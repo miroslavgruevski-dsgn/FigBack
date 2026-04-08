@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/db";
-import { getFileComments, getFile, getCommentReactions } from "./client";
+import { getFileComments, getFile } from "./client";
 import { mapComment } from "./map-comments";
 import { getFigmaToken } from "./token";
-import type { SyncMode, FigmaReaction, GroupedReaction } from "@/types/figma";
+import type { SyncMode } from "@/types/figma";
 
 export function buildFigmaDeepLink(fileKey: string, nodeId: string | null): string | null {
   if (!nodeId) return null;
@@ -40,11 +40,15 @@ export async function syncProject(projectId: string, mode: SyncMode, roundId?: s
 }
 
 async function createReviewCards(projectId: string, roundId: string) {
+  // #region agent log
+  fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'sync.ts:createReviewCards',message:'creating review cards',data:{projectId,roundId},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   const rootComments = await prisma.comment.findMany({
     where: {
       file: { projectId },
       parentId: null,
       processed: false,
+      resolvedAt: null,
     },
     include: {
       file: { select: { fileKey: true } },
@@ -68,6 +72,9 @@ async function createReviewCards(projectId: string, roundId: string) {
     }
   }
 
+  // #region agent log
+  fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'sync.ts:createReviewCards:rootComments',message:'root comments found',data:{rootCommentCount:rootComments.length,sampleIds:rootComments.slice(0,3).map(c=>c.id)},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   let created = 0;
   for (const comment of rootComments) {
     const thread = replyMap.get(comment.id) ?? [];
@@ -97,20 +104,6 @@ async function createReviewCards(projectId: string, roundId: string) {
   });
 }
 
-function groupReactions(raw: FigmaReaction[]): GroupedReaction[] {
-  const map = new Map<string, { count: number; users: string[] }>();
-  for (const r of raw) {
-    const existing = map.get(r.emoji);
-    if (existing) {
-      existing.count++;
-      if (!existing.users.includes(r.user.handle)) existing.users.push(r.user.handle);
-    } else {
-      map.set(r.emoji, { count: 1, users: [r.user.handle] });
-    }
-  }
-  return Array.from(map.entries()).map(([emoji, data]) => ({ emoji, ...data }));
-}
-
 async function syncFile(
   fileId: string,
   fileKey: string,
@@ -126,8 +119,15 @@ async function syncFile(
   const hasPageFilter = pageFilter.size > 0;
   const hasFrameFilter = frameFilter.size > 0;
 
+  // #region agent log
+  const syncT0 = Date.now();
+  // #endregion
   const commentsResponse = await getFileComments(fileKey, token);
   const figmaComments = commentsResponse.comments;
+  // #region agent log
+  const apiMs = Date.now() - syncT0;
+  fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'sync.ts:getFileComments',message:'Figma API comments',data:{fileKey,commentCount:figmaComments?.length??0,hasPageFilter,hasFrameFilter,apiMs},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   let fileTree = null;
   if (mode === "full") {
@@ -150,7 +150,7 @@ async function syncFile(
     });
   }
 
-  const syncedCommentIds: string[] = [];
+  const upsertOps = [];
 
   for (const fc of figmaComments) {
     const mapped = fileTree
@@ -176,45 +176,36 @@ async function syncFile(
       continue;
     }
 
-    syncedCommentIds.push(fc.id);
-
-    await prisma.comment.upsert({
-      where: { id: fc.id },
-      create: {
-        id: fc.id,
-        fileId,
-        message: fc.message,
-        authorId: fc.user.id,
-        authorName: fc.user.handle,
-        authorImg: fc.user.img_url,
-        parentId: fc.parent_id ?? null,
-        createdAt: new Date(fc.created_at),
-        resolvedAt: fc.resolved_at ? new Date(fc.resolved_at) : null,
-        clientMeta: JSON.parse(JSON.stringify(fc.client_meta ?? {})),
-        ...mapped,
-      },
-      update: {
-        message: fc.message,
-        resolvedAt: fc.resolved_at ? new Date(fc.resolved_at) : null,
-        ...mapped,
-      },
-    });
-  }
-
-  const syncedIds = new Set(syncedCommentIds);
-  const rootComments = figmaComments.filter(
-    (fc) => !fc.parent_id && syncedIds.has(fc.id)
-  );
-  for (const fc of rootComments) {
-    try {
-      const res = await getCommentReactions(fileKey, fc.id, token);
-      const grouped = groupReactions(res.reactions);
-      await prisma.comment.update({
+    upsertOps.push(
+      prisma.comment.upsert({
         where: { id: fc.id },
-        data: { reactions: grouped as unknown as import("@prisma/client").Prisma.InputJsonValue },
-      });
-    } catch {
-      // non-critical
-    }
+        create: {
+          id: fc.id,
+          fileId,
+          message: fc.message,
+          authorId: fc.user.id,
+          authorName: fc.user.handle,
+          authorImg: fc.user.img_url,
+          parentId: fc.parent_id || null,
+          createdAt: new Date(fc.created_at),
+          resolvedAt: fc.resolved_at ? new Date(fc.resolved_at) : null,
+          clientMeta: JSON.parse(JSON.stringify(fc.client_meta ?? {})),
+          ...mapped,
+        },
+        update: {
+          message: fc.message,
+          resolvedAt: fc.resolved_at ? new Date(fc.resolved_at) : null,
+          ...mapped,
+        },
+      })
+    );
   }
+
+  const BATCH = 200;
+  for (let i = 0; i < upsertOps.length; i += BATCH) {
+    await prisma.$transaction(upsertOps.slice(i, i + BATCH));
+  }
+  // #region agent log
+  fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'sync.ts:syncFile:done',message:'syncFile complete',data:{fileKey,totalOps:upsertOps.length,totalMs:Date.now()-syncT0},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 }

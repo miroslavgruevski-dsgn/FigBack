@@ -1,15 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getNextPendingJob, claimJob, completeJob, failJob } from "@/lib/jobs";
-import { syncProject } from "@/lib/figma/sync";
-import { exportFrameImages } from "@/lib/figma/export-images";
-import { getFigmaToken } from "@/lib/figma/token";
-import { classifyCard } from "@/lib/llm/classify";
-import { clusterCards } from "@/lib/digest/cluster";
-import { generateExecutiveSummary } from "@/lib/llm/summary";
-import { postSlackDigest } from "@/lib/integrations/slack";
-import { pushToConfluence } from "@/lib/integrations/confluence";
-import { sendPushToAll } from "@/lib/push/send";
+
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const origin = req.headers.get("origin");
@@ -19,6 +12,9 @@ export async function POST(req: NextRequest) {
   }
 
   const job = await getNextPendingJob();
+  // #region agent log
+  fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:21',message:'getNextPendingJob result',data:{hasJob:!!job,jobId:job?.id,jobType:job?.type,jobStatus:job?.status,jobCreatedAt:job?.createdAt},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   if (!job) {
     const running = await prisma.job.findFirst({
       where: { status: "running" },
@@ -32,6 +28,9 @@ export async function POST(req: NextRequest) {
 
   try {
     const claimed = await claimJob(job.id);
+    // #region agent log
+    fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:34',message:'claimJob result',data:{claimed:!!claimed,jobId:job.id,jobType:job.type},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (!claimed) {
       return NextResponse.json({ message: "jobs_running", runningType: job.type });
     }
@@ -40,8 +39,15 @@ export async function POST(req: NextRequest) {
     switch (job.type) {
       case "sync_watch":
       case "sync_full": {
+        const { syncProject } = await import("@/lib/figma/sync");
         const mode = job.type === "sync_full" ? "full" : "watch";
+        // #region agent log
+        fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:sync_full',message:'starting sync',data:{projectId:payload.projectId,roundId:payload.roundId,mode},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         const syncResult = await syncProject(payload.projectId, mode, payload.roundId);
+        // #region agent log
+        fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:sync_done',message:'sync completed',data:{errors:syncResult.errors,newComments:syncResult.newComments},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         if (syncResult.errors.length > 0) {
           const { logger } = await import("@/lib/logger");
           logger.error("Sync errors", { projectId: payload.projectId, errors: syncResult.errors });
@@ -50,6 +56,7 @@ export async function POST(req: NextRequest) {
       }
 
       case "export_images": {
+        const { getFigmaToken } = await import("@/lib/figma/token");
         const token = await getFigmaToken(payload.projectId);
         const files = await prisma.figmaFile.findMany({
           where: { projectId: payload.projectId },
@@ -69,6 +76,7 @@ export async function POST(req: NextRequest) {
             .filter((id): id is string => id !== null);
 
           if (frameIds.length > 0) {
+            const { exportFrameImages } = await import("@/lib/figma/export-images");
             const urls = await exportFrameImages(file.fileKey, frameIds, token);
             for (const [nodeId, url] of urls) {
               allImageUrls.set(nodeId, url);
@@ -110,6 +118,7 @@ export async function POST(req: NextRequest) {
 
         for (const card of cards) {
           try {
+            const { classifyCard } = await import("@/lib/llm/classify");
             const result = await classifyCard(
               {
                 commentText: card.comment.message,
@@ -140,6 +149,7 @@ export async function POST(req: NextRequest) {
 
       case "cluster": {
         if (!payload.roundId) break;
+        const { clusterCards } = await import("@/lib/digest/cluster");
         await clusterCards(payload.roundId);
 
         const config2 = await prisma.teamConfig.findUnique({ where: { id: "default" } });
@@ -168,6 +178,7 @@ export async function POST(req: NextRequest) {
                 }));
 
               if (classified.length > 0) {
+                const { generateExecutiveSummary } = await import("@/lib/llm/summary");
                 const summary = await generateExecutiveSummary(
                   {
                     projectName: roundData.project.name,
@@ -219,6 +230,7 @@ export async function POST(req: NextRequest) {
             }));
 
             if (integrationConfig.autoPostSlack && integrationConfig.slackWebhookUrl) {
+              const { postSlackDigest } = await import("@/lib/integrations/slack");
               const slackResult = await postSlackDigest(integrationConfig.slackWebhookUrl, {
                 projectName: finalRound.project.name,
                 roundName: finalRound.name ?? "Analysis",
@@ -249,6 +261,7 @@ export async function POST(req: NextRequest) {
                 } catch { /* ignore */ }
               }
 
+              const { pushToConfluence } = await import("@/lib/integrations/confluence");
               const confResult = await pushToConfluence(
                 {
                   baseUrl: integrationConfig.confluenceBaseUrl,
@@ -276,6 +289,7 @@ export async function POST(req: NextRequest) {
             }
 
             if (integrationConfig.notifySyncComplete) {
+              const { sendPushToAll } = await import("@/lib/push/send");
               await sendPushToAll({
                 title: `Analysis complete: ${finalRound.project.name}`,
                 body: `${finalRound.clusters.length} issue${finalRound.clusters.length !== 1 ? "s" : ""} found${criticalCount > 0 ? ` (${criticalCount} critical)` : ""}`,
@@ -307,6 +321,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const errStack = err instanceof Error ? err.stack : undefined;
+    const errName = err instanceof Error ? err.name : undefined;
+    const errCode = (err as Record<string, unknown>)?.code;
+    // #region agent log
+    fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:catch',message:'JOB FAILED',data:{jobId:job.id,jobType:job.type,errorMessage:message,errorName:errName,errorCode:errCode,errorStack:errStack?.slice(0,500)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     await failJob(job.id, message);
     return NextResponse.json({ jobId: job.id, type: job.type, status: "failed", error: message }, { status: 500 });
   }

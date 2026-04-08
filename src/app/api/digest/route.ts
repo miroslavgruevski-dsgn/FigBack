@@ -3,6 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { createJobChain, hasActiveJob, expireStaleJobs } from "@/lib/jobs";
 
+export const maxDuration = 60;
+
 const digestSchema = z.object({
   projectId: z.string().min(1),
 });
