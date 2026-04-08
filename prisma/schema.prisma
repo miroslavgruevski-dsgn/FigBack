@@ -1,0 +1,232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Auth.js tables
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  createdAt     DateTime  @default(now())
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expires      DateTime
+}
+
+// App tables
+
+model Project {
+  id               String        @id @default(cuid())
+  name             String
+  description      String?
+  figmaAccessToken String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  archived         Boolean       @default(false)
+  files            FigmaFile[]
+  rounds           ReviewRound[]
+
+  @@index([archived])
+}
+
+model FigmaFile {
+  id           String    @id @default(cuid())
+  projectId    String
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fileKey      String    @unique
+  name         String
+  url          String
+  version      String?
+  lastSyncedAt DateTime?
+  lastError    String?
+  comments     Comment[]
+
+  @@index([projectId])
+}
+
+model Comment {
+  id            String      @id // Figma comment.id
+  fileId        String
+  file          FigmaFile   @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  message       String
+  authorId      String
+  authorName    String
+  authorImg     String?
+  parentId      String?
+  createdAt     DateTime
+  resolvedAt    DateTime?
+  clientMeta    Json
+  nodeId        String?
+  frameId       String?
+  pageId        String?
+  frameName     String?
+  pageName      String?
+  pinX          Float?
+  pinY          Float?
+  regionW       Float?
+  regionH       Float?
+  mapConfidence Float       @default(0)
+  processed     Boolean     @default(false)
+  reactions     Json        @default("[]")
+  reviewCard    ReviewCard?
+
+  @@index([fileId])
+  @@index([parentId])
+  @@index([processed, createdAt(sort: Desc)])
+}
+
+model ReviewRound {
+  id               String         @id @default(cuid())
+  projectId        String
+  project          Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name             String?
+  syncedAt         DateTime       @default(now())
+  archived         Boolean        @default(false)
+  executiveSummary String?
+  commentCount     Int            @default(0)
+  clusters         IssueCluster[]
+  cards            ReviewCard[]
+
+  @@index([projectId, syncedAt(sort: Desc)])
+}
+
+model ReviewCard {
+  id             String         @id @default(cuid())
+  commentId      String         @unique
+  comment        Comment        @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  roundId        String
+  round          ReviewRound    @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  commentThread  Json           @default("[]")
+  frameName      String
+  pageName       String
+  targetNodeName String?
+  targetNodeType String?
+  fullFrameUrl   String?
+  contextCropUrl String?
+  tightCropUrl   String?
+  annotatedUrl   String?
+  figmaDeepLink  String?
+  assessment     LLMAssessment?
+  clusters       IssueCluster[] @relation("CardClusters")
+
+  @@index([roundId])
+}
+
+model LLMAssessment {
+  id              String     @id @default(cuid())
+  cardId          String     @unique
+  card            ReviewCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  elementTarget   String
+  issueType       String
+  actionability   String
+  suggestedAction String
+  needsClarify    Boolean    @default(false)
+  ambiguityReason String?
+  priorityHint    String
+  rawOutput       String?
+}
+
+model IssueCluster {
+  id             String       @id @default(cuid())
+  roundId        String
+  round          ReviewRound  @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  title          String
+  summary        String
+  frameId        String
+  frameName      String
+  pageId         String
+  pageName       String
+  status         String       @default("open")
+  effortEstimate String?
+  assignee       String?
+  notes          String?
+  cards          ReviewCard[] @relation("CardClusters")
+  firstSeenAt    DateTime     @default(now())
+  lastSeenAt     DateTime     @default(now())
+  archivedAt     DateTime?
+  resolvedAt     DateTime?
+
+  @@index([roundId])
+  @@index([status])
+}
+
+model Job {
+  id         String    @id @default(cuid())
+  type       String
+  projectId  String?
+  payload    Json
+  status     String    @default("pending")
+  attempts   Int       @default(0)
+  maxRetries Int       @default(3)
+  nextJobId  String?
+  error      String?
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  doneAt     DateTime?
+
+  @@index([status, createdAt])
+  @@index([projectId])
+}
+
+model TeamConfig {
+  id                 String    @id @default("default")
+  setupComplete      Boolean   @default(false)
+  slackWebhookUrl    String?
+  autoPostSlack      Boolean   @default(false)
+  confluenceBaseUrl  String?
+  confluenceEmail    String?
+  confluenceToken    String?
+  confluenceSpaceKey String?
+  confluenceParentId String?
+  cronEnabled        Boolean   @default(true)
+  notifyNewComments  Boolean   @default(true)
+  notifySyncComplete Boolean   @default(true)
+  llmProvider        String    @default("google")
+  llmModel           String?
+  llmApiKey          String?
+  archiveDays        Int       @default(90)
+  skipLlm            Boolean   @default(false)
+  figmaAccessToken   String?
+  lastCronRunAt      DateTime?
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+}

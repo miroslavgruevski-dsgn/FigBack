@@ -1,0 +1,293 @@
+"use client";
+
+import { useState, useEffect, useCallback, useRef } from "react";
+import Image from "next/image";
+import { ExternalLink, ChevronDown, ChevronUp, Lightbulb } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { PriorityBadge } from "./priority-badge";
+import { StatusBadge } from "./status-badge";
+import type { Priority, IssueStatus } from "@/types/digest";
+
+interface ReactionData {
+  emoji: string;
+  count: number;
+  users: string[];
+}
+
+interface CommentData {
+  authorName: string;
+  authorImg?: string | null;
+  message: string;
+  createdAt: string;
+  reactions?: ReactionData[];
+  replies?: {
+    authorName: string;
+    authorImg?: string | null;
+    message: string;
+    createdAt: string;
+    reactions?: ReactionData[];
+  }[];
+}
+
+const EMOJI_MAP: Record<string, string> = {
+  ":heart:": "❤️",
+  ":+1:": "👍",
+  ":-1:": "👎",
+  ":eyes:": "👀",
+  ":fire:": "🔥",
+  ":tada:": "🎉",
+  ":clap:": "👏",
+  ":100:": "💯",
+  ":thinking_face:": "🤔",
+  ":raised_hands:": "🙌",
+  ":star:": "⭐",
+  ":rocket:": "🚀",
+  ":white_check_mark:": "✅",
+  ":warning:": "⚠️",
+  ":x:": "❌",
+  ":pray:": "🙏",
+  ":muscle:": "💪",
+  ":sparkles:": "✨",
+  ":thumbsup:": "👍",
+  ":thumbsdown:": "👎",
+};
+
+function shortcodeToEmoji(code: string): string {
+  return EMOJI_MAP[code.replace(/::skin-tone-\d:/, "")] ?? code.replace(/:/g, "");
+}
+
+function ReactionPills({ reactions }: { reactions: ReactionData[] }) {
+  if (!reactions.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {reactions.map((r) => (
+        <span
+          key={r.emoji}
+          className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-[11px]"
+          title={r.users.join(", ")}
+        >
+          <span>{shortcodeToEmoji(r.emoji)}</span>
+          {r.count > 1 && <span className="text-muted-foreground">{r.count}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+interface IssueCardProps {
+  title: string;
+  summary: string;
+  frameName: string;
+  pageName?: string;
+  status: IssueStatus;
+  priority?: Priority;
+  effortEstimate?: string | null;
+  figmaDeepLink?: string | null;
+  suggestedAction?: string | null;
+  thumbnailUrl?: string | null;
+  comments: CommentData[];
+}
+
+export function IssueCard({
+  title,
+  summary,
+  frameName,
+  pageName,
+  status,
+  priority,
+  figmaDeepLink,
+  suggestedAction,
+  thumbnailUrl,
+  comments,
+}: IssueCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const closeLightbox = useCallback(() => {
+    setLightboxOpen(false);
+    triggerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeLightbox();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [lightboxOpen, closeLightbox]);
+
+  return (
+    <div className="glass rounded-lg p-5 space-y-3 hover-lift">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5">
+          {priority && <PriorityBadge priority={priority} />}
+          <StatusBadge status={status} />
+        </div>
+        <p className="text-xs text-muted-foreground truncate">
+          {frameName}
+          {pageName && <span> &middot; {pageName}</span>}
+        </p>
+      </div>
+
+      <div className="flex gap-4">
+        {thumbnailUrl && (
+          <button
+            ref={triggerRef}
+            type="button"
+            onClick={() => setLightboxOpen(true)}
+            className="shrink-0 hidden sm:block relative w-28 aspect-[4/3]"
+            aria-label={`View larger preview of ${frameName}`}
+          >
+            <Image
+              src={thumbnailUrl}
+              alt={`Figma frame: ${frameName}`}
+              fill
+              sizes="112px"
+              className="rounded-md object-cover border border-border/50 hover:opacity-80 transition-opacity"
+            />
+          </button>
+        )}
+        <div className="flex-1 min-w-0 space-y-2">
+          {thumbnailUrl && (
+            <button
+              type="button"
+              onClick={() => setLightboxOpen(true)}
+              className="sm:hidden w-full mb-2 relative aspect-[16/9]"
+              aria-label={`View larger preview of ${frameName}`}
+            >
+              <Image
+                src={thumbnailUrl}
+                alt={`Figma frame: ${frameName}`}
+                fill
+                sizes="(max-width: 640px) 100vw, 50vw"
+                className="rounded-md object-cover border border-border/50"
+              />
+            </button>
+          )}
+          <h3 className="font-heading text-base font-semibold leading-snug">{title}</h3>
+          <p className="text-sm text-muted-foreground leading-relaxed">{summary}</p>
+        </div>
+      </div>
+
+      {suggestedAction && (
+        <div className="glass-tint rounded-md px-3 py-2.5 flex gap-2">
+          <Lightbulb className="size-4 text-primary shrink-0 mt-0.5" />
+          <p className="text-sm text-foreground/90">{suggestedAction}</p>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        {figmaDeepLink && (
+          <a
+            href={figmaDeepLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+          >
+            <ExternalLink className="size-3" />
+            Open in Figma
+          </a>
+        )}
+      </div>
+
+      {comments.length > 0 && (
+        <div className="border-t border-border/50 pt-3">
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {expanded ? (
+              <ChevronUp className="size-3.5 transition-transform duration-200" />
+            ) : (
+              <ChevronDown className="size-3.5 transition-transform duration-200" />
+            )}
+            {expanded
+              ? "Hide comments"
+              : `Show ${comments.length} team comment${comments.length !== 1 ? "s" : ""}`}
+          </button>
+
+          <div className="expand-grid" data-expanded={expanded}>
+            <div>
+              <div className="mt-2.5 space-y-2">
+                {comments.map((c, i) => (
+                  <div key={i}>
+                    <div className="flex gap-2">
+                      <Avatar className="size-5 mt-0.5 shrink-0">
+                        <AvatarImage src={c.authorImg ?? undefined} alt={c.authorName} />
+                        <AvatarFallback className="text-[10px]">
+                          {c.authorName[0]?.toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <p className="text-xs">
+                          <span className="font-medium">{c.authorName}</span>
+                          <span className="text-muted-foreground ml-1">
+                            {new Date(c.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+                          </span>
+                        </p>
+                        <p className="text-xs text-muted-foreground line-clamp-3">{c.message}</p>
+                        {c.reactions && c.reactions.length > 0 && (
+                          <ReactionPills reactions={c.reactions} />
+                        )}
+                      </div>
+                    </div>
+                    {c.replies && c.replies.length > 0 && (
+                      <div className="ml-7 mt-1.5 space-y-1.5 border-l-2 border-border/40 pl-3">
+                        {c.replies.map((r, ri) => (
+                          <div key={ri} className="flex gap-2">
+                            <Avatar className="size-4 mt-0.5 shrink-0">
+                              <AvatarImage src={r.authorImg ?? undefined} alt={r.authorName} />
+                              <AvatarFallback className="text-[8px]">
+                                {r.authorName[0]?.toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0">
+                              <p className="text-[11px]">
+                                <span className="font-medium">{r.authorName}</span>
+                                <span className="text-muted-foreground ml-1">
+                                  {new Date(r.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+                                </span>
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">{r.message}</p>
+                              {r.reactions && r.reactions.length > 0 && (
+                                <ReactionPills reactions={r.reactions} />
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lightboxOpen && thumbnailUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm cursor-pointer"
+          onClick={closeLightbox}
+          onKeyDown={(e) => { if (e.key === "Escape") closeLightbox(); }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Preview of ${frameName}`}
+          tabIndex={-1}
+          ref={(el) => el?.focus()}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={thumbnailUrl}
+            alt={`Figma frame: ${frameName}`}
+            className="max-w-[90vw] max-h-[85vh] rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </div>
+  );
+}

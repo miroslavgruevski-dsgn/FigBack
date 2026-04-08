@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FigBack
 
-## Getting Started
+Turn Figma comments into organized, prioritized design feedback.
 
-First, run the development server:
+FigBack watches your Figma files for new comments, classifies them with AI, and generates visual digests with priorities, action items, and executive summaries.
+
+## Prerequisites
+
+- Node.js 20+
+- PostgreSQL database (local or hosted)
+- Google Cloud project with OAuth 2.0 credentials
+- At least one LLM API key (Google AI, OpenAI, or Anthropic)
+- Figma Personal Access Token
+
+## Local Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <repo-url> && cd figback
+cp .env.example .env.local
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Fill in `.env.local` following the instructions inside `.env.example`, then:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npx prisma migrate deploy
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The app starts at `http://localhost:3000`.
 
-## Learn More
+## Environment Variables
 
-To learn more about Next.js, take a look at the following resources:
+See `.env.example` for the full list. The essentials:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Variable | Where to get it |
+|---|---|
+| `DATABASE_URL` | Your PostgreSQL connection string |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) |
+| `AUTH_SECRET` | `openssl rand -base64 32` |
+| `FIGMA_ACCESS_TOKEN` | [Figma Settings](https://www.figma.com/developers/api#access-tokens) |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) |
+| `CRON_SECRET` / `IMAGE_SIGN_SECRET` | `openssl rand -base64 32` |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Google OAuth requires an authorized redirect URI:
+- Dev: `http://localhost:3000/api/auth/callback/google`
+- Prod: `https://your-domain.com/api/auth/callback/google`
 
-## Deploy on Vercel
+## Scripts
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Command | Description |
+|---|---|
+| `npm run dev` | Start dev server |
+| `npm run build` | Production build |
+| `npm run check` | Lint + typecheck |
+| `npm run test` | Run Playwright E2E tests |
+| `npm run db:migrate` | Run Prisma migrations |
+| `npm run db:push` | Push schema changes (dev only) |
+| `npm run db:studio` | Open Prisma Studio |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deploy to Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/symphonyis/figback)
+
+Add a Neon Postgres database from the Vercel Marketplace and set the environment variables in your project settings. The `postinstall` script generates the Prisma client automatically.
+
+## Tech Stack
+
+- Next.js 16, React 19, TypeScript
+- Tailwind CSS v4, shadcn/ui
+- Prisma, PostgreSQL
+- Vercel AI SDK (Gemini / GPT / Claude)
+- Auth.js v5 (Google OAuth)
+- Vercel Blob Storage
+
+## License
+
+MIT
