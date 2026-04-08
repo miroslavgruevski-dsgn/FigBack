@@ -1,8 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Clock, ExternalLink, AlertTriangle, Sparkles, MessageSquare } from "lucide-react";
+import { ArrowLeft, Clock, Sparkles, MessageSquare, TrendingUp } from "lucide-react";
 import { GenerateDigestButton } from "./generate-button";
+import { ReanalyzeButton } from "./reanalyze-button";
+import { DeleteProjectButton } from "./delete-project-button";
+import { ArchiveProjectButton } from "./archive-project-button";
+import { EditableTitle } from "./editable-title";
 import { FigmaTokenField } from "./figma-token-field";
+import { FileManager } from "./file-manager";
 import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/error-state";
 
@@ -19,6 +24,7 @@ type RoundWithFiles = {
 interface ProjectData {
   id: string;
   name: string;
+  archived: boolean;
   figmaAccessToken?: string | null;
   files: {
     id: string;
@@ -27,6 +33,7 @@ interface ProjectData {
     url: string;
     lastSyncedAt: Date | null;
     lastError: string | null;
+    includedPages?: string[];
     _count: { comments: number };
   }[];
   rounds: RoundWithFiles[];
@@ -42,6 +49,7 @@ export default async function ProjectPage({
 
   let project: ProjectData | null = null;
   let dbError = false;
+  let newCommentCount = 0;
 
   try {
     const { prisma } = await import("@/lib/db");
@@ -73,6 +81,17 @@ export default async function ProjectPage({
         };
       });
       project = { ...raw, rounds } as unknown as ProjectData;
+
+      if (raw.rounds.length > 0) {
+        const lastRoundDate = raw.rounds[0].syncedAt;
+        newCommentCount = await prisma.comment.count({
+          where: {
+            file: { projectId },
+            parentId: null,
+            createdAt: { gt: lastRoundDate },
+          },
+        });
+      }
     }
   } catch {
     dbError = true;
@@ -114,13 +133,27 @@ export default async function ProjectPage({
 
       <div className="mt-6 flex items-center justify-between gap-4">
         <div>
-          <h1 className="font-heading text-2xl font-semibold">{project.name}</h1>
+          <EditableTitle projectId={projectId} name={project.name} />
           <p className="mt-1 text-sm text-muted-foreground">
             {project.files.length} file{project.files.length !== 1 ? "s" : ""} · {totalComments} comments
           </p>
         </div>
-        <GenerateDigestButton projectId={projectId} />
+        <div className="flex items-center gap-2">
+          <DeleteProjectButton projectId={projectId} projectName={project.name} />
+          <ArchiveProjectButton projectId={projectId} archived={project.archived} />
+          {project.rounds.length > 0 && <ReanalyzeButton projectId={projectId} />}
+          <GenerateDigestButton projectId={projectId} />
+        </div>
       </div>
+
+      {newCommentCount > 0 && (
+        <div className="mt-4 flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm">
+          <TrendingUp className="size-4 text-primary shrink-0" />
+          <span>
+            <strong>{newCommentCount}</strong> new comment{newCommentCount !== 1 ? "s" : ""} since last analysis
+          </span>
+        </div>
+      )}
 
       <div className="mt-6" id="figma-token-section">
         <FigmaTokenField
@@ -130,51 +163,11 @@ export default async function ProjectPage({
         />
       </div>
 
-      <section className="mt-8">
-        <h2 className="font-heading text-base font-semibold mb-3">Figma Files</h2>
-        <div className="glass rounded-lg p-3">
-          <div className="grid gap-2 sm:grid-cols-2">
-            {project.files.map((file) => {
-              const hasError = !!file.lastError;
-              return (
-                <div
-                  key={file.id}
-                  className="flex items-center gap-3 rounded-md px-3 py-2.5 hover:bg-glass-hover transition-colors"
-                >
-                  <span className={`size-2 rounded-full shrink-0 ${hasError ? "bg-destructive" : "bg-figma-accent"}`} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate">{file.name}</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {file._count.comments} comments
-                      {file.lastSyncedAt && ` · Synced ${new Date(file.lastSyncedAt).toLocaleDateString()}`}
-                    </p>
-                    {hasError && (
-                      <p className="text-[11px] text-destructive mt-0.5 flex items-center gap-1">
-                        <AlertTriangle className="size-3 shrink-0" />
-                        <span className="truncate">{file.lastError}</span>
-                        {hasTokenError && (
-                          <a href="#figma-token-section" className="underline underline-offset-2 shrink-0 ml-1">
-                            Update token
-                          </a>
-                        )}
-                      </p>
-                    )}
-                  </div>
-                  <a
-                    href={file.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                    aria-label={`Open ${file.name} in Figma`}
-                  >
-                    <ExternalLink className="size-3.5" />
-                  </a>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
+      <FileManager
+        projectId={projectId}
+        files={project.files}
+        hasTokenError={hasTokenError}
+      />
 
       <section className="mt-8">
         <h2 className="font-heading text-base font-semibold mb-3">Analyses</h2>

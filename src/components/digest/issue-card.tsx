@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
-import { ExternalLink, ChevronDown, ChevronUp, Lightbulb } from "lucide-react";
+import { ExternalLink, ChevronDown, ChevronUp, Lightbulb, CheckCircle2, Circle, Loader2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PriorityBadge } from "./priority-badge";
 import { StatusBadge } from "./status-badge";
@@ -75,6 +75,7 @@ function ReactionPills({ reactions }: { reactions: ReactionData[] }) {
 }
 
 interface IssueCardProps {
+  clusterId?: string;
   title: string;
   summary: string;
   frameName: string;
@@ -88,12 +89,20 @@ interface IssueCardProps {
   comments: CommentData[];
 }
 
+const STATUS_CYCLE: IssueStatus[] = ["open", "in_progress", "done"];
+const STATUS_LABELS: Record<string, string> = {
+  "open": "Open",
+  "in_progress": "In Progress",
+  "done": "Done",
+};
+
 export function IssueCard({
+  clusterId,
   title,
   summary,
   frameName,
   pageName,
-  status,
+  status: initialStatus,
   priority,
   figmaDeepLink,
   suggestedAction,
@@ -102,6 +111,8 @@ export function IssueCard({
 }: IssueCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [status, setStatus] = useState<IssueStatus>(initialStatus);
+  const [updating, setUpdating] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const closeLightbox = useCallback(() => {
@@ -118,12 +129,46 @@ export function IssueCard({
     return () => document.removeEventListener("keydown", handler);
   }, [lightboxOpen, closeLightbox]);
 
+  async function cycleStatus() {
+    if (!clusterId || updating) return;
+    const currentIdx = STATUS_CYCLE.indexOf(status);
+    const nextStatus = STATUS_CYCLE[(currentIdx + 1) % STATUS_CYCLE.length];
+    setUpdating(true);
+    try {
+      const res = await fetch(`/api/issues/${clusterId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (res.ok) setStatus(nextStatus);
+    } catch { /* ignore */ }
+    setUpdating(false);
+  }
+
   return (
-    <div className="glass rounded-lg p-5 space-y-3 hover-lift">
+    <div className={`glass rounded-lg p-5 space-y-3 hover-lift ${status === "done" ? "opacity-60" : ""}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-1.5">
           {priority && <PriorityBadge priority={priority} />}
-          <StatusBadge status={status} />
+          {clusterId ? (
+            <button
+              onClick={cycleStatus}
+              disabled={updating}
+              className="inline-flex items-center gap-1 text-xs transition-colors hover:opacity-80"
+              title={`Click to change status (${STATUS_LABELS[status]})`}
+            >
+              {updating ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : status === "done" ? (
+                <CheckCircle2 className="size-3 text-green-500" />
+              ) : (
+                <Circle className="size-3" />
+              )}
+              <StatusBadge status={status} />
+            </button>
+          ) : (
+            <StatusBadge status={status} />
+          )}
         </div>
         <p className="text-xs text-muted-foreground truncate">
           {frameName}

@@ -63,16 +63,17 @@ model Project {
 }
 
 model FigmaFile {
-  id           String    @id @default(cuid())
-  projectId    String
-  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  fileKey      String    @unique
-  name         String
-  url          String
-  version      String?
-  lastSyncedAt DateTime?
-  lastError    String?
-  comments     Comment[]
+  id            String    @id @default(cuid())
+  projectId     String
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fileKey       String    @unique
+  name          String
+  url           String
+  version       String?
+  lastSyncedAt  DateTime?
+  lastError     String?
+  includedPages String[]  @default([])
+  comments      Comment[]
 
   @@index([projectId])
 }

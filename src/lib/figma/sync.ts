@@ -9,7 +9,7 @@ export function buildFigmaDeepLink(fileKey: string, nodeId: string | null): stri
   return `https://www.figma.com/design/${fileKey}?node-id=${encodeURIComponent(nodeId)}`;
 }
 
-export async function syncProject(projectId: string, mode: SyncMode) {
+export async function syncProject(projectId: string, mode: SyncMode, roundId?: string) {
   const project = await prisma.project.findUniqueOrThrow({
     where: { id: projectId },
     include: { files: true },
@@ -32,7 +32,69 @@ export async function syncProject(projectId: string, mode: SyncMode) {
     }
   }
 
+  if (roundId) {
+    await createReviewCards(projectId, roundId);
+  }
+
   return results;
+}
+
+async function createReviewCards(projectId: string, roundId: string) {
+  const rootComments = await prisma.comment.findMany({
+    where: {
+      file: { projectId },
+      parentId: null,
+      processed: false,
+    },
+    include: {
+      file: { select: { fileKey: true } },
+    },
+  });
+
+  const replyMap = new Map<string, { message: string; authorName: string; authorImg: string | null; createdAt: Date }[]>();
+  if (rootComments.length > 0) {
+    const replies = await prisma.comment.findMany({
+      where: {
+        parentId: { in: rootComments.map((c) => c.id) },
+      },
+      select: { parentId: true, message: true, authorName: true, authorImg: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    });
+    for (const r of replies) {
+      if (!r.parentId) continue;
+      const list = replyMap.get(r.parentId) ?? [];
+      list.push({ message: r.message, authorName: r.authorName, authorImg: r.authorImg, createdAt: r.createdAt });
+      replyMap.set(r.parentId, list);
+    }
+  }
+
+  let created = 0;
+  for (const comment of rootComments) {
+    const thread = replyMap.get(comment.id) ?? [];
+    await prisma.reviewCard.create({
+      data: {
+        commentId: comment.id,
+        roundId,
+        commentThread: thread as unknown as import("@prisma/client").Prisma.InputJsonValue,
+        frameName: comment.frameName ?? "Unknown",
+        pageName: comment.pageName ?? "Unknown",
+        targetNodeName: null,
+        targetNodeType: null,
+        figmaDeepLink: buildFigmaDeepLink(comment.file.fileKey, comment.nodeId),
+      },
+    });
+
+    await prisma.comment.update({
+      where: { id: comment.id },
+      data: { processed: true },
+    });
+    created++;
+  }
+
+  await prisma.reviewRound.update({
+    where: { id: roundId },
+    data: { commentCount: created },
+  });
 }
 
 function groupReactions(raw: FigmaReaction[]): GroupedReaction[] {
@@ -55,6 +117,13 @@ async function syncFile(
   token: string,
   mode: SyncMode
 ) {
+  const dbFile = await prisma.figmaFile.findUniqueOrThrow({
+    where: { id: fileId },
+    select: { includedPages: true },
+  });
+  const pageFilter = new Set(dbFile.includedPages);
+  const hasPageFilter = pageFilter.size > 0;
+
   const commentsResponse = await getFileComments(fileKey, token);
   const figmaComments = commentsResponse.comments;
 
@@ -79,6 +148,8 @@ async function syncFile(
     });
   }
 
+  const syncedCommentIds: string[] = [];
+
   for (const fc of figmaComments) {
     const mapped = fileTree
       ? mapComment(fc, fileTree)
@@ -94,6 +165,12 @@ async function syncFile(
           regionH: null,
           mapConfidence: fc.client_meta?.node_id ? 0.5 : 0,
         };
+
+    if (hasPageFilter && mapped.pageId && !pageFilter.has(mapped.pageId)) {
+      continue;
+    }
+
+    syncedCommentIds.push(fc.id);
 
     await prisma.comment.upsert({
       where: { id: fc.id },
@@ -118,8 +195,10 @@ async function syncFile(
     });
   }
 
-  // Fetch reactions for root comments only (replies rarely get reactions)
-  const rootComments = figmaComments.filter((fc) => !fc.parent_id);
+  const syncedIds = new Set(syncedCommentIds);
+  const rootComments = figmaComments.filter(
+    (fc) => !fc.parent_id && syncedIds.has(fc.id)
+  );
   for (const fc of rootComments) {
     try {
       const res = await getCommentReactions(fileKey, fc.id, token);
@@ -129,7 +208,7 @@ async function syncFile(
         data: { reactions: grouped as unknown as import("@prisma/client").Prisma.InputJsonValue },
       });
     } catch {
-      // non-critical — skip if reactions endpoint fails
+      // non-critical
     }
   }
 }

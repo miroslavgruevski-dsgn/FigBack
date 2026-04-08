@@ -3,6 +3,7 @@ import { ArrowLeft, BarChart3, Filter, ChevronRight } from "lucide-react";
 import { SummaryCard } from "@/components/digest/summary-card";
 import { StatsBar } from "@/components/digest/stats-bar";
 import { IssueCard } from "@/components/digest/issue-card";
+import { DigestActions } from "./digest-actions";
 import { ErrorState } from "@/components/ui/error-state";
 import { Badge } from "@/components/ui/badge";
 import type { Priority, IssueStatus } from "@/types/digest";
@@ -211,11 +212,14 @@ export default async function DigestPage({
         Back to project
       </Link>
 
-      <div className="mt-6">
-        <h1 className="font-heading text-2xl font-semibold">{round.name}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {totalComments} comments across {clusters.length} issues
-        </p>
+      <div className="mt-6 flex items-center justify-between gap-4">
+        <div>
+          <h1 className="font-heading text-2xl font-semibold">{round.name}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {totalComments} comments across {clusters.length} issues
+          </p>
+        </div>
+        <DigestActions projectId={projectId} roundId={round.id} />
       </div>
 
       <div className="mt-6">
@@ -316,6 +320,7 @@ function SectionedClusters({ clusters }: { clusters: DigestCluster[] }) {
                       return (
                         <IssueCard
                           key={cluster.id}
+                          clusterId={cluster.id}
                           title={cluster.title}
                           summary={cluster.summary}
                           frameName={cluster.frameName}

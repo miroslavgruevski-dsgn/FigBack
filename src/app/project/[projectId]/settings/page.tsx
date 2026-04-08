@@ -1,17 +1,45 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { ArrowLeft, Settings } from "lucide-react";
+import { ErrorState } from "@/components/ui/error-state";
+import { ProjectSettingsForm } from "./settings-form";
+
+export const dynamic = "force-dynamic";
 
 export default async function ProjectSettingsPage({
   params,
 }: {
   params: Promise<{ projectId: string }>;
 }) {
-  await params;
+  const { projectId } = await params;
+
+  let project: { id: string; name: string; archived: boolean; figmaAccessToken: string | null } | null = null;
+  let dbError = false;
+
+  try {
+    const { prisma } = await import("@/lib/db");
+    project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, name: true, archived: true, figmaAccessToken: true },
+    });
+  } catch {
+    dbError = true;
+  }
+
+  if (dbError) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <ErrorState title="Failed to load settings" description="Check your database connection." />
+      </div>
+    );
+  }
+
+  if (!project) notFound();
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <Link
-        href="/"
+        href={`/project/${projectId}`}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" />
@@ -25,11 +53,12 @@ export default async function ProjectSettingsPage({
         <h1 className="font-heading text-2xl font-semibold">Project Settings</h1>
       </div>
 
-      <div className="glass mt-8 rounded-lg p-5">
-        <p className="text-sm text-muted-foreground">
-          Project configuration (rename, add/remove files, archive) coming in Phase 7.
-        </p>
-      </div>
+      <ProjectSettingsForm
+        projectId={projectId}
+        defaultName={project.name}
+        defaultArchived={project.archived}
+        hasToken={!!project.figmaAccessToken}
+      />
     </div>
   );
 }

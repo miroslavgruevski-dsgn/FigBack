@@ -7,10 +7,12 @@ import {
   AlertTriangle,
   Clock,
   Sparkles,
+  Archive,
 } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { QuickCreate } from "@/components/dashboard/quick-create";
 import { cn } from "@/lib/utils";
 
 import type { Metadata } from "next";
@@ -65,30 +67,62 @@ interface Project {
 
 export default async function DashboardPage() {
   let projects: Project[] = [];
+  let archivedProjects: Project[] = [];
   let dbError = false;
+
+  const projectInclude = {
+    files: {
+      select: { id: true, name: true, fileKey: true, lastError: true, lastSyncedAt: true, _count: { select: { comments: true } } },
+    },
+    _count: { select: { rounds: true } },
+    rounds: {
+      orderBy: { syncedAt: "desc" as const },
+      take: 5,
+      select: {
+        id: true, name: true, syncedAt: true, commentCount: true,
+        cards: { select: { comment: { select: { file: { select: { name: true } } } } } },
+      },
+    },
+  };
 
   try {
     const { prisma } = await import("@/lib/db");
     projects = await prisma.project.findMany({
       where: { archived: false },
-      include: {
-        files: {
-          select: { id: true, name: true, fileKey: true, lastError: true, lastSyncedAt: true, _count: { select: { comments: true } } },
-        },
-        _count: { select: { rounds: true } },
-        rounds: {
-          orderBy: { syncedAt: "desc" },
-          take: 5,
-          select: {
-            id: true, name: true, syncedAt: true, commentCount: true,
-            cards: { select: { comment: { select: { file: { select: { name: true } } } } } },
-          },
-        },
-      },
+      include: projectInclude,
+      orderBy: { updatedAt: "desc" },
+    }) as unknown as Project[];
+
+    archivedProjects = await prisma.project.findMany({
+      where: { archived: true },
+      include: projectInclude,
       orderBy: { updatedAt: "desc" },
     }) as unknown as Project[];
   } catch {
     dbError = true;
+  }
+
+  let openIssues = 0;
+  let resolvedIssues = 0;
+  let totalIssues = 0;
+
+  if (!dbError) {
+    try {
+      const { prisma } = await import("@/lib/db");
+      const projectIds = projects.map((p) => p.id);
+      if (projectIds.length > 0) {
+        const counts = await prisma.issueCluster.groupBy({
+          by: ["status"],
+          where: { round: { projectId: { in: projectIds } } },
+          _count: true,
+        });
+        for (const c of counts) {
+          totalIssues += c._count;
+          if (c.status === "done") resolvedIssues += c._count;
+          else if (c.status === "open" || c.status === "in_progress") openIssues += c._count;
+        }
+      }
+    } catch { /* non-critical */ }
   }
 
   const totalComments = projects.reduce(
@@ -166,6 +200,7 @@ export default async function DashboardPage() {
       ) : (
         <>
           <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <QuickCreate />
             {projects.map((project) => {
               const comments = project.files.reduce((sum, f) => sum + f._count.comments, 0);
               const hasError = project.files.some((f) => f.lastError);
@@ -205,9 +240,22 @@ export default async function DashboardPage() {
                       </div>
                     </div>
                   </div>
-                  {project.files[0]?.lastSyncedAt && (
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      Synced {timeAgo(new Date(project.files[0].lastSyncedAt))}
+                  {project.files[0]?.lastSyncedAt ? (
+                    (() => {
+                      const syncDate = new Date(project.files[0].lastSyncedAt!);
+                      const hoursAgo = (Date.now() - syncDate.getTime()) / (1000 * 60 * 60);
+                      const stale = hoursAgo > 24;
+                      return (
+                        <p className={cn("mt-3 text-xs", stale ? "text-amber-500" : "text-muted-foreground")}>
+                          {stale && <AlertTriangle className="inline size-3 mr-1 -mt-0.5" />}
+                          Synced {timeAgo(syncDate)}
+                        </p>
+                      );
+                    })()
+                  ) : (
+                    <p className="mt-3 text-xs text-amber-500">
+                      <AlertTriangle className="inline size-3 mr-1 -mt-0.5" />
+                      Never synced
                     </p>
                   )}
                 </Link>
@@ -215,7 +263,7 @@ export default async function DashboardPage() {
             })}
           </div>
 
-          <div className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
             <div className="glass rounded-lg px-4 py-3 text-center">
               <p className="text-2xl font-semibold font-heading">{totalComments}</p>
               <p className="text-xs text-muted-foreground mt-0.5">Comments</p>
@@ -228,6 +276,20 @@ export default async function DashboardPage() {
               <p className="text-2xl font-semibold font-heading">{totalFiles}</p>
               <p className="text-xs text-muted-foreground mt-0.5">Files</p>
             </div>
+            {totalIssues > 0 && (
+              <div className="glass rounded-lg px-4 py-3 text-center">
+                <p className="text-2xl font-semibold font-heading">{openIssues}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Open issues</p>
+              </div>
+            )}
+            {totalIssues > 0 && (
+              <div className="glass rounded-lg px-4 py-3 text-center">
+                <p className="text-2xl font-semibold font-heading text-green-500">
+                  {totalIssues > 0 ? Math.round((resolvedIssues / totalIssues) * 100) : 0}%
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">Resolved</p>
+              </div>
+            )}
             {syncErrors > 0 && (
               <div className="glass rounded-lg px-4 py-3 text-center">
                 <p className="text-2xl font-semibold font-heading text-destructive">{syncErrors}</p>
@@ -270,6 +332,39 @@ export default async function DashboardPage() {
                     <Sparkles className="size-4 text-primary shrink-0 ml-3" />
                   </Link>
                 ))}
+              </div>
+            </section>
+          )}
+
+          {archivedProjects.length > 0 && (
+            <section className="mt-8">
+              <h2 className="flex items-center gap-2 font-heading text-base font-semibold mb-3">
+                <Archive className="size-4 text-muted-foreground" />
+                Archived
+              </h2>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {archivedProjects.map((project) => {
+                  const comments = project.files.reduce((sum, f) => sum + f._count.comments, 0);
+                  return (
+                    <Link
+                      key={project.id}
+                      href={`/project/${project.id}`}
+                      className="glass rounded-lg p-4 opacity-60 hover:opacity-100 transition-opacity"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+                          <Archive className="size-4 text-muted-foreground" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-medium truncate">{project.name}</h3>
+                          <p className="text-xs text-muted-foreground">
+                            {project.files.length} files · {comments} comments
+                          </p>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
               </div>
             </section>
           )}
