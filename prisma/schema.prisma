@@ -72,8 +72,9 @@ model FigmaFile {
   version       String?
   lastSyncedAt  DateTime?
   lastError     String?
-  includedPages String[]  @default([])
-  comments      Comment[]
+  includedPages  String[]  @default([])
+  includedFrames String[]  @default([])
+  comments       Comment[]
 
   @@index([projectId])
 }

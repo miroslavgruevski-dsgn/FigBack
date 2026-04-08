@@ -40,11 +40,13 @@ export async function POST(req: NextRequest) {
           where: { projectId: payload.projectId },
           include: {
             comments: {
-              where: { processed: false, parentId: null, frameId: { not: null } },
-              select: { frameId: true, fileId: true },
+              where: { parentId: null, frameId: { not: null } },
+              select: { id: true, frameId: true },
             },
           },
         });
+
+        const allImageUrls = new Map<string, string>();
 
         for (const file of files) {
           const frameIds = file.comments
@@ -52,7 +54,27 @@ export async function POST(req: NextRequest) {
             .filter((id): id is string => id !== null);
 
           if (frameIds.length > 0) {
-            await exportFrameImages(file.fileKey, frameIds, token);
+            const urls = await exportFrameImages(file.fileKey, frameIds, token);
+            for (const [nodeId, url] of urls) {
+              allImageUrls.set(nodeId, url);
+            }
+          }
+        }
+
+        if (allImageUrls.size > 0 && payload.roundId) {
+          const cards = await prisma.reviewCard.findMany({
+            where: { roundId: payload.roundId },
+            include: { comment: { select: { frameId: true } } },
+          });
+
+          for (const card of cards) {
+            const frameId = card.comment.frameId;
+            if (frameId && allImageUrls.has(frameId)) {
+              await prisma.reviewCard.update({
+                where: { id: card.id },
+                data: { fullFrameUrl: allImageUrls.get(frameId) },
+              });
+            }
           }
         }
         break;

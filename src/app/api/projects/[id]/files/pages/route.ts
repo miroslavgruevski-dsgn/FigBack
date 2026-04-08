@@ -3,6 +3,13 @@ import { prisma } from "@/lib/db";
 import { getFile } from "@/lib/figma/client";
 import { getFigmaToken } from "@/lib/figma/token";
 
+const FRAME_TYPES = new Set([
+  "FRAME",
+  "COMPONENT",
+  "COMPONENT_SET",
+  "SECTION",
+]);
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -31,9 +38,16 @@ export async function GET(
 
   try {
     const figmaFile = await getFile(file.fileKey, token);
-    const pages = (figmaFile.document.children ?? []).map((child) => ({
-      id: child.id,
-      name: child.name,
+    const pages = (figmaFile.document.children ?? []).map((page) => ({
+      id: page.id,
+      name: page.name,
+      children: (page.children ?? [])
+        .filter((child) => FRAME_TYPES.has(child.type))
+        .map((child) => ({
+          id: child.id,
+          name: child.name,
+          type: child.type,
+        })),
     }));
 
     return NextResponse.json({ pages });

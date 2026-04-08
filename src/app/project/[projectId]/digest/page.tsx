@@ -93,6 +93,7 @@ export default async function DigestPage({
                   },
                   assessment: true,
                 },
+                orderBy: { id: "asc" },
               },
             },
             orderBy: { lastSeenAt: "desc" },
@@ -115,6 +116,7 @@ export default async function DigestPage({
           pageName: c.pageName,
           status: c.status as IssueStatus,
           effortEstimate: c.effortEstimate,
+          thumbnailUrl: c.cards.find((card) => card.fullFrameUrl)?.fullFrameUrl ?? undefined,
           cards: c.cards.map((card) => ({
             id: card.id,
             figmaDeepLink: card.figmaDeepLink,

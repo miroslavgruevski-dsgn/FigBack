@@ -119,10 +119,12 @@ async function syncFile(
 ) {
   const dbFile = await prisma.figmaFile.findUniqueOrThrow({
     where: { id: fileId },
-    select: { includedPages: true },
+    select: { includedPages: true, includedFrames: true },
   });
   const pageFilter = new Set(dbFile.includedPages);
+  const frameFilter = new Set(dbFile.includedFrames);
   const hasPageFilter = pageFilter.size > 0;
+  const hasFrameFilter = frameFilter.size > 0;
 
   const commentsResponse = await getFileComments(fileKey, token);
   const figmaComments = commentsResponse.comments;
@@ -167,6 +169,10 @@ async function syncFile(
         };
 
     if (hasPageFilter && mapped.pageId && !pageFilter.has(mapped.pageId)) {
+      continue;
+    }
+
+    if (hasFrameFilter && mapped.frameId && !frameFilter.has(mapped.frameId)) {
       continue;
     }
 

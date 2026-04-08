@@ -11,6 +11,8 @@ import {
   Settings2,
   Check,
   X,
+  ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +25,7 @@ interface FigmaFileData {
   lastSyncedAt: Date | null;
   lastError: string | null;
   includedPages?: string[];
+  includedFrames?: string[];
   _count: { comments: number };
 }
 
@@ -180,9 +183,20 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
                           )}
                         </p>
                       )}
-                      {file.includedPages && file.includedPages.length > 0 && (
+                      {((file.includedPages && file.includedPages.length > 0) ||
+                        (file.includedFrames && file.includedFrames.length > 0)) && (
                         <p className="text-[11px] text-muted-foreground mt-0.5">
-                          {file.includedPages.length} page{file.includedPages.length !== 1 ? "s" : ""} selected
+                          {[
+                            file.includedPages?.length
+                              ? `${file.includedPages.length} page${file.includedPages.length !== 1 ? "s" : ""}`
+                              : null,
+                            file.includedFrames?.length
+                              ? `${file.includedFrames.length} frame${file.includedFrames.length !== 1 ? "s" : ""}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(", ")}{" "}
+                          selected
                         </p>
                       )}
                     </div>
@@ -237,6 +251,12 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
   );
 }
 
+interface PageNode {
+  id: string;
+  name: string;
+  children?: { id: string; name: string; type: string }[];
+}
+
 interface PageSelectorProps {
   projectId: string;
   file: FigmaFileData;
@@ -245,18 +265,20 @@ interface PageSelectorProps {
 
 function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
   const router = useRouter();
-  const [pages, setPages] = useState<{ id: string; name: string }[] | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(
+  const [pages, setPages] = useState<PageNode[] | null>(null);
+  const [selectedPages, setSelectedPages] = useState<Set<string>>(
     new Set(file.includedPages ?? [])
   );
+  const [selectedFrames, setSelectedFrames] = useState<Set<string>>(
+    new Set(file.includedFrames ?? [])
+  );
+  const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(
-      `/api/projects/${projectId}/files/pages?fileId=${file.id}`
-    )
+    fetch(`/api/projects/${projectId}/files/pages?fileId=${file.id}`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch pages");
         return res.json();
@@ -272,7 +294,7 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
   }, [projectId, file.id]);
 
   function togglePage(pageId: string) {
-    setSelected((prev) => {
+    setSelectedPages((prev) => {
       const next = new Set(prev);
       if (next.has(pageId)) {
         next.delete(pageId);
@@ -283,6 +305,45 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
     });
   }
 
+  function toggleFrame(frameId: string) {
+    setSelectedFrames((prev) => {
+      const next = new Set(prev);
+      if (next.has(frameId)) {
+        next.delete(frameId);
+      } else {
+        next.add(frameId);
+      }
+      return next;
+    });
+  }
+
+  function toggleExpand(pageId: string) {
+    setExpandedPages((prev) => {
+      const next = new Set(prev);
+      if (next.has(pageId)) {
+        next.delete(pageId);
+      } else {
+        next.add(pageId);
+      }
+      return next;
+    });
+  }
+
+  function selectAll() {
+    if (!pages) return;
+    const allPageIds = new Set(pages.map((p) => p.id));
+    const allFrameIds = new Set(
+      pages.flatMap((p) => (p.children ?? []).map((c) => c.id))
+    );
+    setSelectedPages(allPageIds);
+    setSelectedFrames(allFrameIds);
+  }
+
+  function clearAll() {
+    setSelectedPages(new Set());
+    setSelectedFrames(new Set());
+  }
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -291,7 +352,8 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileId: file.id,
-          includedPages: [...selected],
+          includedPages: [...selectedPages],
+          includedFrames: [...selectedFrames],
         }),
       });
       router.refresh();
@@ -307,8 +369,8 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
     <div className="mx-3 mb-2 rounded-md border border-border bg-background p-3 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium">
-          Select pages to include
-          <span className="text-muted-foreground ml-1">(empty = all pages)</span>
+          Select pages &amp; frames to include
+          <span className="text-muted-foreground ml-1">(empty = all)</span>
         </p>
         <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
           <X className="size-3.5" />
@@ -323,31 +385,73 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
         <p className="text-xs text-destructive">{fetchError}</p>
       ) : pages && pages.length > 0 ? (
         <>
-          <div className="space-y-1 max-h-48 overflow-y-auto">
-            {pages.map((page) => (
-              <label
-                key={page.id}
-                className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted/50 cursor-pointer text-sm"
-              >
-                <div
-                  className={`size-4 rounded border flex items-center justify-center transition-colors ${
-                    selected.has(page.id)
-                      ? "bg-primary border-primary text-primary-foreground"
-                      : "border-border"
-                  }`}
-                >
-                  {selected.has(page.id) && <Check className="size-3" />}
+          <div className="space-y-0.5 max-h-64 overflow-y-auto">
+            {pages.map((page) => {
+              const hasChildren = page.children && page.children.length > 0;
+              const isExpanded = expandedPages.has(page.id);
+              return (
+                <div key={page.id}>
+                  <div className="flex items-center gap-1 rounded px-1 py-1 hover:bg-muted/50">
+                    {hasChildren ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(page.id)}
+                        className="p-0.5 text-muted-foreground hover:text-foreground shrink-0"
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="size-3" />
+                        ) : (
+                          <ChevronRight className="size-3" />
+                        )}
+                      </button>
+                    ) : (
+                      <span className="w-4" />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => togglePage(page.id)}
+                      className="flex items-center gap-2 flex-1 text-sm text-left"
+                    >
+                      <Checkbox checked={selectedPages.has(page.id)} />
+                      <span className="truncate">{page.name}</span>
+                    </button>
+                  </div>
+                  {hasChildren && isExpanded && (
+                    <div className="ml-5 border-l border-border/40 pl-2 space-y-0.5">
+                      {page.children!.map((frame) => (
+                        <button
+                          key={frame.id}
+                          type="button"
+                          onClick={() => toggleFrame(frame.id)}
+                          className="flex items-center gap-2 rounded px-1 py-1 hover:bg-muted/50 w-full text-left text-sm"
+                        >
+                          <Checkbox checked={selectedFrames.has(frame.id)} />
+                          <span className="truncate">{frame.name}</span>
+                          <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+                            {frame.type.toLowerCase()}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {page.name}
-              </label>
-            ))}
+              );
+            })}
           </div>
           <div className="flex gap-2">
             <Button
               size="sm"
               variant="outline"
               className="flex-1 rounded-lg text-xs"
-              onClick={() => setSelected(new Set())}
+              onClick={selectAll}
+            >
+              Select all
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1 rounded-lg text-xs"
+              onClick={clearAll}
             >
               Clear all
             </Button>
@@ -364,6 +468,20 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
       ) : (
         <p className="text-xs text-muted-foreground">No pages found in this file.</p>
       )}
+    </div>
+  );
+}
+
+function Checkbox({ checked }: { checked: boolean }) {
+  return (
+    <div
+      className={`size-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+        checked
+          ? "bg-primary border-primary text-primary-foreground"
+          : "border-border"
+      }`}
+    >
+      {checked && <Check className="size-3" />}
     </div>
   );
 }

@@ -34,6 +34,7 @@ interface ProjectData {
     lastSyncedAt: Date | null;
     lastError: string | null;
     includedPages?: string[];
+    includedFrames?: string[];
     _count: { comments: number };
   }[];
   rounds: RoundWithFiles[];

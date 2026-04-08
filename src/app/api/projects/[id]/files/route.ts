@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { extractFileKey } from "@/lib/figma/client";
+import { extractFileKey, getFile } from "@/lib/figma/client";
+import { getFigmaToken } from "@/lib/figma/token";
 
 const addSchema = z.object({
   url: z.string().url(),
@@ -14,6 +15,7 @@ const deleteSchema = z.object({
 const patchSchema = z.object({
   fileId: z.string().min(1),
   includedPages: z.array(z.string()).optional(),
+  includedFrames: z.array(z.string()).optional(),
 });
 
 export async function POST(
@@ -49,12 +51,23 @@ export async function POST(
     );
   }
 
+  let fileName = `File ${fileKey.slice(0, 8)}`;
+  try {
+    const token = await getFigmaToken(id);
+    if (token) {
+      const figmaData = await getFile(fileKey, token);
+      if (figmaData.name) fileName = figmaData.name;
+    }
+  } catch {
+    // keep placeholder if Figma API fails
+  }
+
   const file = await prisma.figmaFile.create({
     data: {
       projectId: id,
       fileKey,
       url: parsed.data.url,
-      name: `File ${fileKey.slice(0, 8)}`,
+      name: fileName,
     },
   });
 
@@ -118,6 +131,9 @@ export async function PATCH(
     data: {
       ...(parsed.data.includedPages !== undefined && {
         includedPages: parsed.data.includedPages,
+      }),
+      ...(parsed.data.includedFrames !== undefined && {
+        includedFrames: parsed.data.includedFrames,
       }),
     },
   });

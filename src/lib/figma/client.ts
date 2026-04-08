@@ -66,7 +66,7 @@ export async function getFile(
   token: string
 ): Promise<FigmaFileResponse> {
   return figmaFetch<FigmaFileResponse>(
-    `/files/${fileKey}?depth=2`,
+    `/files/${fileKey}?depth=4`,
     token
   );
 }
