@@ -41,7 +41,11 @@ export async function POST(req: NextRequest) {
       case "sync_watch":
       case "sync_full": {
         const mode = job.type === "sync_full" ? "full" : "watch";
-        await syncProject(payload.projectId, mode, payload.roundId);
+        const syncResult = await syncProject(payload.projectId, mode, payload.roundId);
+        if (syncResult.errors.length > 0) {
+          const { logger } = await import("@/lib/logger");
+          logger.error("Sync errors", { projectId: payload.projectId, errors: syncResult.errors });
+        }
         break;
       }
 
