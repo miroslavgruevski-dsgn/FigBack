@@ -282,10 +282,18 @@ export async function POST(req: NextRequest) {
     }
 
     await completeJob(job.id);
-    return NextResponse.json({ jobId: job.id, status: "done" });
+
+    const next = await getNextPendingJob();
+    return NextResponse.json({
+      jobId: job.id,
+      type: job.type,
+      status: "done",
+      hasMore: !!next,
+      nextType: next?.type ?? null,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await failJob(job.id, message);
-    return NextResponse.json({ jobId: job.id, status: "failed", error: message }, { status: 500 });
+    return NextResponse.json({ jobId: job.id, type: job.type, status: "failed", error: message }, { status: 500 });
   }
 }

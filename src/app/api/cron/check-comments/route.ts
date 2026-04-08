@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { createJob, hasActiveJob } from "@/lib/jobs";
+import { syncProject } from "@/lib/figma/sync";
 import { sendPushToAll } from "@/lib/push/send";
 import { postSlackSyncSummary } from "@/lib/integrations/slack";
+
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
@@ -20,16 +22,19 @@ export async function POST(req: NextRequest) {
     select: { id: true, name: true },
   });
 
-  const queuedProjects: { name: string; id: string }[] = [];
-  for (const project of projects) {
-    const existing = await hasActiveJob(project.id, "sync_watch");
-    if (existing) continue;
+  const syncedProjects: { name: string; id: string }[] = [];
+  const errors: string[] = [];
 
-    await createJob("sync_watch", project.id, { projectId: project.id });
-    queuedProjects.push(project);
+  for (const project of projects) {
+    try {
+      await syncProject(project.id, "watch");
+      syncedProjects.push(project);
+    } catch (err) {
+      errors.push(`${project.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
-  const queued = queuedProjects.length;
+  const synced = syncedProjects.length;
 
   if (config) {
     await prisma.teamConfig.update({
@@ -37,22 +42,22 @@ export async function POST(req: NextRequest) {
       data: { lastCronRunAt: new Date() },
     });
 
-    if (queued > 0 && config.notifyNewComments) {
+    if (synced > 0 && config.notifyNewComments) {
       await sendPushToAll({
         title: "Checking for new comments",
-        body: `Syncing ${queued} project${queued !== 1 ? "s" : ""} with Figma`,
+        body: `Synced ${synced} project${synced !== 1 ? "s" : ""} with Figma`,
         url: "/",
       });
     }
 
-    if (queued > 0 && config.autoPostSlack && config.slackWebhookUrl) {
+    if (synced > 0 && config.autoPostSlack && config.slackWebhookUrl) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
       await postSlackSyncSummary(
         config.slackWebhookUrl,
-        queuedProjects.map((p) => ({ name: p.name, url: `${appUrl}/project/${p.id}` }))
+        syncedProjects.map((p) => ({ name: p.name, url: `${appUrl}/project/${p.id}` }))
       ).catch(() => {});
     }
   }
 
-  return NextResponse.json({ ok: true, queued });
+  return NextResponse.json({ ok: true, synced, errors });
 }

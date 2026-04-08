@@ -11,6 +11,6 @@ export type JobType =
   | "classify"
   | "cluster";
 
-export type JobStatus = "pending" | "running" | "done" | "failed";
+export type JobStatus = "pending" | "waiting" | "running" | "done" | "failed";
 
 export type LlmProvider = "google" | "openai" | "anthropic";

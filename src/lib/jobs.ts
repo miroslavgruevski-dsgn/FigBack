@@ -24,19 +24,23 @@ export async function createJobChain(
 ) {
   if (steps.length === 0) return null;
 
-  const jobs = [];
+  const jobs: { id: string }[] = [];
   for (let i = steps.length - 1; i >= 0; i--) {
-    const nextJobId = jobs.length > 0 ? jobs[jobs.length - 1].id : undefined;
-    const job = await createJob(
-      steps[i].type,
-      projectId,
-      steps[i].payload,
-      nextJobId
-    );
+    const nextJobId: string | undefined = jobs.length > 0 ? jobs[jobs.length - 1].id : undefined;
+    const isFirst = i === 0;
+    const job = await prisma.job.create({
+      data: {
+        type: steps[i].type,
+        projectId,
+        payload: steps[i].payload as unknown as Prisma.InputJsonValue,
+        nextJobId: nextJobId ?? null,
+        status: isFirst ? "pending" : "waiting",
+      },
+    });
     jobs.push(job);
   }
 
-  return jobs[jobs.length - 1]; // first job in chain
+  return jobs[jobs.length - 1];
 }
 
 export async function claimJob(jobId: string) {
@@ -56,7 +60,7 @@ export async function completeJob(jobId: string) {
     await prisma.job.update({
       where: { id: job.nextJobId },
       data: { status: "pending" },
-    });
+    }).catch(() => {});
   }
 
   return job;
