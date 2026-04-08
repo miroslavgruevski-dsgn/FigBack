@@ -2,7 +2,11 @@ interface SlackBlock {
   type: string;
   text?: { type: string; text: string; emoji?: boolean };
   fields?: { type: string; text: string }[];
-  elements?: { type: string; text: { type: string; text: string }; url?: string }[];
+  elements?: (
+    | { type: "button"; text: { type: string; text: string }; url?: string }
+    | { type: "mrkdwn"; text: string }
+    | { type: "plain_text"; text: string }
+  )[];
   accessory?: Record<string, unknown>;
 }
 
@@ -16,17 +20,25 @@ interface DigestPayload {
   topIssues: { title: string; priority: string }[];
 }
 
+const PRIORITY_EMOJI: Record<string, string> = {
+  critical: ":red_circle:",
+  high: ":large_orange_circle:",
+  medium: ":large_yellow_circle:",
+  low: ":white_circle:",
+};
+
 export async function postSlackDigest(
   webhookUrl: string,
   payload: DigestPayload
 ): Promise<{ ok: boolean; error?: string }> {
-  const blocks = buildBlocks(payload);
+  const blocks = buildDigestBlocks(payload);
+  const fallback = `FigBack: ${payload.projectName} \u2014 ${payload.totalComments} comments \u2192 ${payload.totalClusters} issues`;
 
   try {
     const res = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ blocks }),
+      body: JSON.stringify({ text: fallback, blocks }),
     });
 
     if (!res.ok) {
@@ -39,7 +51,10 @@ export async function postSlackDigest(
   }
 }
 
-function buildBlocks(payload: DigestPayload): SlackBlock[] {
+function buildDigestBlocks(payload: DigestPayload): SlackBlock[] {
+  const criticalNote =
+    payload.criticalCount > 0 ? `  \u2022  :rotating_light: *${payload.criticalCount} critical*` : "";
+
   const blocks: SlackBlock[] = [
     {
       type: "header",
@@ -49,20 +64,25 @@ function buildBlocks(payload: DigestPayload): SlackBlock[] {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${payload.roundName}* \u2014 ${payload.totalComments} comments \u2192 ${payload.totalClusters} issues${
-          payload.criticalCount > 0 ? ` (${payload.criticalCount} critical)` : ""
-        }`,
+        text: [
+          `*${payload.roundName}*`,
+          `${payload.totalComments} comments \u2192 ${payload.totalClusters} issue${payload.totalClusters !== 1 ? "s" : ""}${criticalNote}`,
+        ].join("\n"),
       },
     },
   ];
 
   if (payload.topIssues.length > 0) {
+    blocks.push({ type: "divider" });
+
+    const lines = payload.topIssues.slice(0, 5).map((issue) => {
+      const emoji = PRIORITY_EMOJI[issue.priority] ?? PRIORITY_EMOJI.medium;
+      return `${emoji}  ${issue.title}`;
+    });
+
     blocks.push({
       type: "section",
-      fields: payload.topIssues.slice(0, 5).map((issue) => ({
-        type: "mrkdwn",
-        text: `*${issue.priority.toUpperCase()}* ${issue.title}`,
-      })),
+      text: { type: "mrkdwn", text: lines.join("\n") },
     });
   }
 
@@ -77,38 +97,59 @@ function buildBlocks(payload: DigestPayload): SlackBlock[] {
     ],
   });
 
+  const now = new Date();
+  const ts = now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    + " at "
+    + now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
+  blocks.push({
+    type: "context",
+    elements: [
+      { type: "mrkdwn", text: `Posted via FigBack  \u2022  ${ts}` },
+    ],
+  });
+
   return blocks;
 }
 
-export async function postSlackNewComments(
+export async function postSlackSyncSummary(
   webhookUrl: string,
-  projectName: string,
-  newCount: number,
-  projectUrl: string
-) {
+  projects: { name: string; url: string }[]
+): Promise<{ ok: boolean; error?: string }> {
+  const count = projects.length;
+  const fallback = `FigBack: checking ${count} project${count !== 1 ? "s" : ""} for new comments`;
+
+  const projectList = projects
+    .slice(0, 10)
+    .map((p) => `\u2022 <${p.url}|${p.name}>`)
+    .join("\n");
+
   const blocks: SlackBlock[] = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${newCount} new comment${newCount !== 1 ? "s" : ""}* on *${projectName}* in Figma`,
+        text: `:mag: *Checking ${count} project${count !== 1 ? "s" : ""} for new Figma comments*`,
       },
     },
     {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: "View in FigBack" },
-          url: projectUrl,
-        },
-      ],
+      type: "section",
+      text: { type: "mrkdwn", text: projectList },
     },
   ];
 
-  return fetch(webhookUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ blocks }),
-  });
+  try {
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: fallback, blocks }),
+    });
+
+    if (!res.ok) {
+      return { ok: false, error: `Slack responded with ${res.status}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
 }

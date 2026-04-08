@@ -212,8 +212,9 @@ model TeamConfig {
   confluenceEmail    String?
   confluenceToken    String?
   confluenceSpaceKey String?
-  confluenceParentId String?
-  cronEnabled        Boolean   @default(true)
+  confluenceParentId  String?
+  autoPostConfluence  Boolean   @default(false)
+  cronEnabled         Boolean   @default(true)
   notifyNewComments  Boolean   @default(true)
   notifySyncComplete Boolean   @default(true)
   llmProvider        String    @default("google")

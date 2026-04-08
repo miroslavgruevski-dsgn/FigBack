@@ -14,6 +14,7 @@ const updateSchema = z.object({
   confluenceToken: z.string().nullable().optional(),
   confluenceSpaceKey: z.string().nullable().optional(),
   confluenceParentId: z.string().nullable().optional(),
+  autoPostConfluence: z.boolean().optional(),
   cronEnabled: z.boolean().optional(),
   notifyNewComments: z.boolean().optional(),
   notifySyncComplete: z.boolean().optional(),

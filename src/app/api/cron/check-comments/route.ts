@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createJob, hasActiveJob } from "@/lib/jobs";
 import { sendPushToAll } from "@/lib/push/send";
-import { postSlackNewComments } from "@/lib/integrations/slack";
+import { postSlackSyncSummary } from "@/lib/integrations/slack";
 
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
@@ -20,14 +20,16 @@ export async function POST(req: NextRequest) {
     select: { id: true, name: true },
   });
 
-  let queued = 0;
+  const queuedProjects: { name: string; id: string }[] = [];
   for (const project of projects) {
     const existing = await hasActiveJob(project.id, "sync_watch");
     if (existing) continue;
 
     await createJob("sync_watch", project.id, { projectId: project.id });
-    queued++;
+    queuedProjects.push(project);
   }
+
+  const queued = queuedProjects.length;
 
   if (config) {
     await prisma.teamConfig.update({
@@ -37,22 +39,18 @@ export async function POST(req: NextRequest) {
 
     if (queued > 0 && config.notifyNewComments) {
       await sendPushToAll({
-        title: "FigBack sync started",
-        body: `Checking ${queued} project${queued > 1 ? "s" : ""} for new comments`,
+        title: "Checking for new comments",
+        body: `Syncing ${queued} project${queued !== 1 ? "s" : ""} with Figma`,
         url: "/",
       });
     }
 
     if (queued > 0 && config.autoPostSlack && config.slackWebhookUrl) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-      for (const project of projects) {
-        await postSlackNewComments(
-          config.slackWebhookUrl,
-          project.name,
-          queued,
-          `${appUrl}/project/${project.id}`
-        ).catch(() => {});
-      }
+      await postSlackSyncSummary(
+        config.slackWebhookUrl,
+        queuedProjects.map((p) => ({ name: p.name, url: `${appUrl}/project/${p.id}` }))
+      ).catch(() => {});
     }
   }
 

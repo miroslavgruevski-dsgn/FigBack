@@ -9,6 +9,7 @@ import { clusterCards } from "@/lib/digest/cluster";
 import { generateExecutiveSummary } from "@/lib/llm/summary";
 import { postSlackDigest } from "@/lib/integrations/slack";
 import { pushToConfluence } from "@/lib/integrations/confluence";
+import { sendPushToAll } from "@/lib/push/send";
 
 export async function POST(req: NextRequest) {
   const origin = req.headers.get("origin");
@@ -204,7 +205,7 @@ export async function POST(req: NextRequest) {
             }));
 
             if (integrationConfig.autoPostSlack && integrationConfig.slackWebhookUrl) {
-              await postSlackDigest(integrationConfig.slackWebhookUrl, {
+              const slackResult = await postSlackDigest(integrationConfig.slackWebhookUrl, {
                 projectName: finalRound.project.name,
                 roundName: finalRound.name ?? "Analysis",
                 totalComments: finalRound.commentCount,
@@ -213,9 +214,14 @@ export async function POST(req: NextRequest) {
                 digestUrl,
                 topIssues,
               });
+              if (!slackResult.ok) {
+                const { logger } = await import("@/lib/logger");
+                logger.error("Slack digest post failed", { roundId: payload.roundId, error: slackResult.error });
+              }
             }
 
             if (
+              integrationConfig.autoPostConfluence &&
               integrationConfig.confluenceBaseUrl &&
               integrationConfig.confluenceEmail &&
               integrationConfig.confluenceToken &&
@@ -229,7 +235,7 @@ export async function POST(req: NextRequest) {
                 } catch { /* ignore */ }
               }
 
-              await pushToConfluence(
+              const confResult = await pushToConfluence(
                 {
                   baseUrl: integrationConfig.confluenceBaseUrl,
                   email: integrationConfig.confluenceEmail,
@@ -238,7 +244,7 @@ export async function POST(req: NextRequest) {
                   parentId: integrationConfig.confluenceParentId,
                 },
                 {
-                  title: `FigBack: ${finalRound.project.name} — ${finalRound.name ?? "Analysis"}`,
+                  title: `FigBack: ${finalRound.project.name} \u2014 ${finalRound.name ?? "Analysis"}`,
                   summary: summaryText,
                   clusters: finalRound.clusters.map((c) => ({
                     title: c.title,
@@ -249,6 +255,18 @@ export async function POST(req: NextRequest) {
                   })),
                 }
               );
+              if (!confResult.ok) {
+                const { logger } = await import("@/lib/logger");
+                logger.error("Confluence push failed", { roundId: payload.roundId, error: confResult.error });
+              }
+            }
+
+            if (integrationConfig.notifySyncComplete) {
+              await sendPushToAll({
+                title: `Analysis complete: ${finalRound.project.name}`,
+                body: `${finalRound.clusters.length} issue${finalRound.clusters.length !== 1 ? "s" : ""} found${criticalCount > 0 ? ` (${criticalCount} critical)` : ""}`,
+                url: digestUrl,
+              });
             }
           }
         } catch (err) {

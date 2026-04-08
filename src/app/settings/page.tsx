@@ -20,8 +20,11 @@ interface TeamConfig {
   confluenceEmail: string | null;
   confluenceToken: string | null;
   confluenceSpaceKey: string | null;
+  confluenceParentId: string | null;
+  autoPostConfluence: boolean;
   cronEnabled: boolean;
   notifyNewComments: boolean;
+  notifySyncComplete: boolean;
   archiveDays: number;
 }
 
@@ -307,6 +310,11 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="conf-parent" className="text-xs">Parent Page ID (optional)</Label>
+              <Input id="conf-parent" placeholder="123456789" defaultValue={config.confluenceParentId ?? ""} className="rounded-lg w-48" onBlur={(e) => save({ confluenceParentId: e.target.value || null })} />
+              <p className="text-[11px] text-muted-foreground">Find this in the page URL after <code className="rounded bg-muted px-1 py-0.5 text-[10px]">/pages/</code>. New digests will be created as child pages.</p>
+            </div>
             <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <ExternalLink className="size-3 shrink-0 mt-0.5" />
               <span>
@@ -317,18 +325,33 @@ export default function SettingsPage() {
                 {" "}and use it with your Atlassian email.
               </span>
             </p>
+            <div className={cn("flex items-center gap-3 transition-opacity", !confluenceConnected && "opacity-40")}>
+              <Switch
+                checked={config.autoPostConfluence}
+                onCheckedChange={(checked) => save({ autoPostConfluence: checked })}
+                id="auto-confluence"
+                disabled={!confluenceConnected}
+              />
+              <Label htmlFor="auto-confluence" className="text-sm">
+                Auto-push digest to Confluence after analysis
+              </Label>
+            </div>
           </div>
         </SettingsCard>
 
-        <SettingsCard title="Notifications" description="Control automated alerts.">
+        <SettingsCard title="Notifications" description="Control automated alerts and push notifications.">
           <div className="space-y-3">
             <div className="flex items-center gap-3">
               <Switch checked={config.cronEnabled} onCheckedChange={(checked) => save({ cronEnabled: checked })} id="cron" />
-              <Label htmlFor="cron" className="text-sm">Auto-check for new comments (every 60 min)</Label>
+              <Label htmlFor="cron" className="text-sm">Auto-check for new comments (daily)</Label>
             </div>
             <div className="flex items-center gap-3">
               <Switch checked={config.notifyNewComments} onCheckedChange={(checked) => save({ notifyNewComments: checked })} id="notify-comments" />
-              <Label htmlFor="notify-comments" className="text-sm">Push notifications for new comments</Label>
+              <Label htmlFor="notify-comments" className="text-sm">Push notification when sync starts</Label>
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch checked={config.notifySyncComplete} onCheckedChange={(checked) => save({ notifySyncComplete: checked })} id="notify-complete" />
+              <Label htmlFor="notify-complete" className="text-sm">Push notification when analysis completes</Label>
             </div>
           </div>
         </SettingsCard>
