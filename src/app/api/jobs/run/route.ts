@@ -108,35 +108,40 @@ export async function POST(req: NextRequest) {
             assessment: null,
           },
           include: { comment: true },
-          take: 20,
         });
 
-        for (const card of cards) {
-          try {
-            const { classifyCard } = await import("@/lib/llm/classify");
-            const result = await classifyCard(
-              {
-                commentText: card.comment.message,
-                authorName: card.comment.authorName,
-                frameName: card.frameName,
-                pageName: card.pageName,
-              },
-              {
-                provider: config?.llmProvider,
-                model: config?.llmModel,
-                apiKey: config?.llmApiKey,
-              }
-            );
+        const { classifyCard } = await import("@/lib/llm/classify");
+        const llmOpts = {
+          provider: config?.llmProvider,
+          model: config?.llmModel,
+          apiKey: config?.llmApiKey,
+        };
 
-            await prisma.lLMAssessment.create({
-              data: {
-                cardId: card.id,
-                ...result,
-              },
-            });
-          } catch (err) {
-            const { logger } = await import("@/lib/logger");
-            logger.error("Classification failed", { cardId: card.id, error: err instanceof Error ? err.message : String(err) });
+        const concurrency = 5;
+        for (let i = 0; i < cards.length; i += concurrency) {
+          const batch = cards.slice(i, i + concurrency);
+          const results = await Promise.allSettled(
+            batch.map((card) =>
+              classifyCard(
+                {
+                  commentText: card.comment.message,
+                  authorName: card.comment.authorName,
+                  frameName: card.frameName,
+                  pageName: card.pageName,
+                },
+                llmOpts
+              ).then(async (result) => {
+                await prisma.lLMAssessment.create({
+                  data: { cardId: card.id, ...result },
+                });
+              })
+            )
+          );
+          for (const r of results) {
+            if (r.status === "rejected") {
+              const { logger } = await import("@/lib/logger");
+              logger.error("Classification failed", { error: String(r.reason) });
+            }
           }
         }
         break;

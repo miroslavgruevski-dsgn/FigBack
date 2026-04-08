@@ -8,7 +8,7 @@ interface ProviderConfig {
 }
 
 const defaultModels: Record<LlmProvider, string> = {
-  google: "gemini-2.5-flash-preview-04-17",
+  google: "gemini-2.5-flash",
   openai: "gpt-4o-mini",
   anthropic: "claude-sonnet-4-20250514",
 };
