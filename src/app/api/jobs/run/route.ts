@@ -45,6 +45,9 @@ export async function POST(req: NextRequest) {
 
       case "export_images": {
         try {
+          // #region agent log
+          fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:export_images_start',message:'export_images job started',data:{projectId:payload.projectId,roundId:payload.roundId},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+          // #endregion
           const { getFigmaToken } = await import("@/lib/figma/token");
           const token = await getFigmaToken(payload.projectId);
           const files = await prisma.figmaFile.findMany({
@@ -57,6 +60,10 @@ export async function POST(req: NextRequest) {
             },
           });
 
+          // #region agent log
+          fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:files_fetched',message:'files and comments fetched',data:{fileCount:files.length,commentCounts:files.map(f=>({fileKey:f.fileKey,comments:f.comments.length,frameIds:f.comments.map(c=>c.frameId)}))},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+          // #endregion
+
           const allImageUrls = new Map<string, string>();
 
           for (const file of files) {
@@ -67,11 +74,18 @@ export async function POST(req: NextRequest) {
             if (frameIds.length > 0) {
               const { exportFrameImages } = await import("@/lib/figma/export-images");
               const urls = await exportFrameImages(file.fileKey, frameIds, token);
+              // #region agent log
+              fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:images_fetched',message:'figma image URLs fetched',data:{fileKey:file.fileKey,frameIdCount:frameIds.length,urlCount:urls.size,sampleUrl:[...urls.values()][0]?.slice(0,80)},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+              // #endregion
               for (const [nodeId, url] of urls) {
                 allImageUrls.set(nodeId, url);
               }
             }
           }
+
+          // #region agent log
+          fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:before_card_update',message:'about to update cards',data:{totalImageUrls:allImageUrls.size,hasRoundId:!!payload.roundId,roundId:payload.roundId},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+          // #endregion
 
           if (allImageUrls.size > 0 && payload.roundId) {
             const cards = await prisma.reviewCard.findMany({
@@ -79,6 +93,7 @@ export async function POST(req: NextRequest) {
               include: { comment: { select: { frameId: true } } },
             });
 
+            let matched = 0;
             for (const card of cards) {
               const frameId = card.comment.frameId;
               if (frameId && allImageUrls.has(frameId)) {
@@ -86,10 +101,17 @@ export async function POST(req: NextRequest) {
                   where: { id: card.id },
                   data: { fullFrameUrl: allImageUrls.get(frameId) },
                 });
+                matched++;
               }
             }
+            // #region agent log
+            fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:cards_updated',message:'cards updated with image URLs',data:{totalCards:cards.length,matchedCards:matched},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+            // #endregion
           }
         } catch (err) {
+          // #region agent log
+          fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:export_images_error',message:'export_images failed',data:{error:err instanceof Error ? err.message : String(err)},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+          // #endregion
           const { logger } = await import("@/lib/logger");
           logger.error("Export images failed (non-critical)", {
             error: err instanceof Error ? err.message : String(err),

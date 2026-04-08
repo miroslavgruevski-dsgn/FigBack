@@ -48,7 +48,7 @@ export function GenerateDigestButton({
           return;
         }
 
-        if (data.hasMore && data.nextType !== "export_images") {
+        if (data.hasMore) {
           setStage(formatJobType(data.nextType));
         } else {
           setLoading(false);
