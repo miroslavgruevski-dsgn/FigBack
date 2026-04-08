@@ -56,49 +56,57 @@ export async function POST(req: NextRequest) {
       }
 
       case "export_images": {
-        const { getFigmaToken } = await import("@/lib/figma/token");
-        const token = await getFigmaToken(payload.projectId);
-        const files = await prisma.figmaFile.findMany({
-          where: { projectId: payload.projectId },
-          include: {
-            comments: {
-              where: { parentId: null, frameId: { not: null } },
-              select: { id: true, frameId: true },
+        try {
+          if (!process.env.BLOB_READ_WRITE_TOKEN) break;
+          const { getFigmaToken } = await import("@/lib/figma/token");
+          const token = await getFigmaToken(payload.projectId);
+          const files = await prisma.figmaFile.findMany({
+            where: { projectId: payload.projectId },
+            include: {
+              comments: {
+                where: { parentId: null, frameId: { not: null } },
+                select: { id: true, frameId: true },
+              },
             },
-          },
-        });
-
-        const allImageUrls = new Map<string, string>();
-
-        for (const file of files) {
-          const frameIds = file.comments
-            .map((c) => c.frameId)
-            .filter((id): id is string => id !== null);
-
-          if (frameIds.length > 0) {
-            const { exportFrameImages } = await import("@/lib/figma/export-images");
-            const urls = await exportFrameImages(file.fileKey, frameIds, token);
-            for (const [nodeId, url] of urls) {
-              allImageUrls.set(nodeId, url);
-            }
-          }
-        }
-
-        if (allImageUrls.size > 0 && payload.roundId) {
-          const cards = await prisma.reviewCard.findMany({
-            where: { roundId: payload.roundId },
-            include: { comment: { select: { frameId: true } } },
           });
 
-          for (const card of cards) {
-            const frameId = card.comment.frameId;
-            if (frameId && allImageUrls.has(frameId)) {
-              await prisma.reviewCard.update({
-                where: { id: card.id },
-                data: { fullFrameUrl: allImageUrls.get(frameId) },
-              });
+          const allImageUrls = new Map<string, string>();
+
+          for (const file of files) {
+            const frameIds = [...new Set(
+              file.comments.map((c) => c.frameId).filter((id): id is string => id !== null)
+            )].slice(0, 20);
+
+            if (frameIds.length > 0) {
+              const { exportFrameImages } = await import("@/lib/figma/export-images");
+              const urls = await exportFrameImages(file.fileKey, frameIds, token);
+              for (const [nodeId, url] of urls) {
+                allImageUrls.set(nodeId, url);
+              }
             }
           }
+
+          if (allImageUrls.size > 0 && payload.roundId) {
+            const cards = await prisma.reviewCard.findMany({
+              where: { roundId: payload.roundId },
+              include: { comment: { select: { frameId: true } } },
+            });
+
+            for (const card of cards) {
+              const frameId = card.comment.frameId;
+              if (frameId && allImageUrls.has(frameId)) {
+                await prisma.reviewCard.update({
+                  where: { id: card.id },
+                  data: { fullFrameUrl: allImageUrls.get(frameId) },
+                });
+              }
+            }
+          }
+        } catch (err) {
+          const { logger } = await import("@/lib/logger");
+          logger.error("Export images failed (non-critical)", {
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
         break;
       }

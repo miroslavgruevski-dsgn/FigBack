@@ -43,9 +43,9 @@ export async function POST(req: NextRequest) {
 
   const firstJob = await createJobChain(projectId, [
     { type: "sync_full", payload: { projectId, roundId: round.id } },
-    { type: "export_images", payload: { projectId, roundId: round.id } },
     { type: "classify", payload: { projectId, roundId: round.id } },
     { type: "cluster", payload: { projectId, roundId: round.id } },
+    { type: "export_images", payload: { projectId, roundId: round.id } },
   ]);
 
   return NextResponse.json({ jobId: firstJob?.id, roundId: round.id });

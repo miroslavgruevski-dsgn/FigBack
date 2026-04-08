@@ -91,7 +91,29 @@ export async function failJob(jobId: string, error: string) {
   });
 }
 
+const STUCK_RUNNING_MS = 2 * 60 * 1000; // 2 minutes
+
+export async function recoverStuckJobs() {
+  const cutoff = new Date(Date.now() - STUCK_RUNNING_MS);
+  const stuck = await prisma.job.findMany({
+    where: { status: "running", startedAt: { lt: cutoff } },
+  });
+  for (const job of stuck) {
+    const shouldRetry = job.attempts < job.maxRetries;
+    await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        status: shouldRetry ? "pending" : "failed",
+        error: "Timed out (stuck)",
+        doneAt: shouldRetry ? null : new Date(),
+      },
+    });
+  }
+  return stuck.length;
+}
+
 export async function getNextPendingJob() {
+  await recoverStuckJobs();
   return prisma.job.findFirst({
     where: { status: "pending" },
     orderBy: { createdAt: "asc" },
