@@ -45,7 +45,6 @@ export async function POST(req: NextRequest) {
 
       case "export_images": {
         try {
-          if (!process.env.BLOB_READ_WRITE_TOKEN) break;
           const { getFigmaToken } = await import("@/lib/figma/token");
           const token = await getFigmaToken(payload.projectId);
           const files = await prisma.figmaFile.findMany({
@@ -63,7 +62,7 @@ export async function POST(req: NextRequest) {
           for (const file of files) {
             const frameIds = [...new Set(
               file.comments.map((c) => c.frameId).filter((id): id is string => id !== null)
-            )].slice(0, 20);
+            )];
 
             if (frameIds.length > 0) {
               const { exportFrameImages } = await import("@/lib/figma/export-images");
