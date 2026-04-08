@@ -45,9 +45,6 @@ export async function syncProject(projectId: string, mode: SyncMode, roundId?: s
 }
 
 async function createReviewCards(projectId: string, roundId: string) {
-  // #region agent log
-  fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'sync.ts:createReviewCards',message:'creating review cards',data:{projectId,roundId},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   const rootComments = await prisma.comment.findMany({
     where: {
       file: { projectId },
@@ -77,9 +74,6 @@ async function createReviewCards(projectId: string, roundId: string) {
     }
   }
 
-  // #region agent log
-  fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'sync.ts:createReviewCards:rootComments',message:'root comments found',data:{rootCommentCount:rootComments.length,sampleIds:rootComments.slice(0,3).map(c=>c.id)},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   let created = 0;
   for (const comment of rootComments) {
     const thread = replyMap.get(comment.id) ?? [];
@@ -124,15 +118,8 @@ async function syncFile(
   const hasPageFilter = pageFilter.size > 0;
   const hasFrameFilter = frameFilter.size > 0;
 
-  // #region agent log
-  const syncT0 = Date.now();
-  // #endregion
   const commentsResponse = await getFileComments(fileKey, token);
   const figmaComments = commentsResponse.comments;
-  // #region agent log
-  const apiMs = Date.now() - syncT0;
-  fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'sync.ts:getFileComments',message:'Figma API comments',data:{fileKey,commentCount:figmaComments?.length??0,hasPageFilter,hasFrameFilter,apiMs},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   let fileTree = null;
   if (mode === "full") {
@@ -210,7 +197,4 @@ async function syncFile(
   for (let i = 0; i < upsertOps.length; i += BATCH) {
     await prisma.$transaction(upsertOps.slice(i, i + BATCH));
   }
-  // #region agent log
-  fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'sync.ts:syncFile:done',message:'syncFile complete',data:{fileKey,totalOps:upsertOps.length,totalMs:Date.now()-syncT0},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 }

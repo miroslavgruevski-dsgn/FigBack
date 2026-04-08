@@ -12,9 +12,6 @@ export async function POST(req: NextRequest) {
   }
 
   const job = await getNextPendingJob();
-  // #region agent log
-  fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:21',message:'getNextPendingJob result',data:{hasJob:!!job,jobId:job?.id,jobType:job?.type,jobStatus:job?.status,jobCreatedAt:job?.createdAt},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   if (!job) {
     const running = await prisma.job.findFirst({
       where: { status: "running" },
@@ -28,9 +25,6 @@ export async function POST(req: NextRequest) {
 
   try {
     const claimed = await claimJob(job.id);
-    // #region agent log
-    fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:34',message:'claimJob result',data:{claimed:!!claimed,jobId:job.id,jobType:job.type},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (!claimed) {
       return NextResponse.json({ message: "jobs_running", runningType: job.type });
     }
@@ -41,13 +35,7 @@ export async function POST(req: NextRequest) {
       case "sync_full": {
         const { syncProject } = await import("@/lib/figma/sync");
         const mode = job.type === "sync_full" ? "full" : "watch";
-        // #region agent log
-        fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:sync_full',message:'starting sync',data:{projectId:payload.projectId,roundId:payload.roundId,mode},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         const syncResult = await syncProject(payload.projectId, mode, payload.roundId);
-        // #region agent log
-        fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:sync_done',message:'sync completed',data:{errors:syncResult.errors,newComments:syncResult.newComments},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (syncResult.errors.length > 0) {
           const { logger } = await import("@/lib/logger");
           logger.error("Sync errors", { projectId: payload.projectId, errors: syncResult.errors });
@@ -329,12 +317,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const errStack = err instanceof Error ? err.stack : undefined;
-    const errName = err instanceof Error ? err.name : undefined;
-    const errCode = (err as Record<string, unknown>)?.code;
-    // #region agent log
-    fetch('http://127.0.0.1:7755/ingest/39e64033-6f89-4c17-bd62-9468c340b463',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'834cbc'},body:JSON.stringify({sessionId:'834cbc',location:'jobs/run/route.ts:catch',message:'JOB FAILED',data:{jobId:job.id,jobType:job.type,errorMessage:message,errorName:errName,errorCode:errCode,errorStack:errStack?.slice(0,500)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     await failJob(job.id, message);
     return NextResponse.json({ jobId: job.id, type: job.type, status: "failed", error: message }, { status: 500 });
   }
