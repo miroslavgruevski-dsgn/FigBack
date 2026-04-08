@@ -17,4 +17,24 @@ test.describe("Auth Pages", () => {
     await retryLink.click();
     await expect(page).toHaveURL(/\/auth\/signin/);
   });
+
+  test("unauthenticated users are redirected to sign-in from dashboard", async ({ page }) => {
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/auth\/signin/);
+  });
+
+  test("unauthenticated users are redirected from settings", async ({ page }) => {
+    await page.goto("/settings");
+    await expect(page).toHaveURL(/\/auth\/signin/);
+  });
+
+  test("unauthenticated users are redirected from project/new", async ({ page }) => {
+    await page.goto("/project/new");
+    await expect(page).toHaveURL(/\/auth\/signin/);
+  });
+
+  test("redirect preserves callback URL", async ({ page }) => {
+    await page.goto("/project/new");
+    await expect(page).toHaveURL(/callbackUrl/);
+  });
 });

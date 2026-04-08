@@ -2,9 +2,9 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 const pages = [
-  { name: "Dashboard", path: "/" },
-  { name: "Settings", path: "/settings" },
-  { name: "Digest", path: "/project/proj-checkout/digest?roundId=round-3" },
+  { name: "Sign In", path: "/auth/signin" },
+  { name: "Auth Error", path: "/auth/error" },
+  { name: "Onboarding", path: "/onboarding" },
 ];
 
 for (const { name, path } of pages) {
