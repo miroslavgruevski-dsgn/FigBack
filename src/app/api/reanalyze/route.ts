@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { createJobChain, hasActiveJob } from "@/lib/jobs";
+import { createJobChain, hasActiveJob, expireStaleJobs } from "@/lib/jobs";
 import { buildFigmaDeepLink } from "@/lib/figma/sync";
 import type { Prisma } from "@prisma/client";
 
@@ -23,6 +23,8 @@ export async function POST(req: NextRequest) {
   }
 
   const { projectId } = parsed.data;
+
+  await expireStaleJobs(projectId);
 
   const active = await hasActiveJob(projectId, "classify");
   if (active) {

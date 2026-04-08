@@ -20,11 +20,21 @@ export async function POST(req: NextRequest) {
 
   const job = await getNextPendingJob();
   if (!job) {
-    return NextResponse.json({ message: "No pending jobs" });
+    const running = await prisma.job.findFirst({
+      where: { status: "running" },
+      select: { type: true },
+    });
+    if (running) {
+      return NextResponse.json({ message: "jobs_running", runningType: running.type });
+    }
+    return NextResponse.json({ message: "all_done" });
   }
 
   try {
-    await claimJob(job.id);
+    const claimed = await claimJob(job.id);
+    if (!claimed) {
+      return NextResponse.json({ message: "jobs_running", runningType: job.type });
+    }
     const payload = job.payload as Record<string, string>;
 
     switch (job.type) {

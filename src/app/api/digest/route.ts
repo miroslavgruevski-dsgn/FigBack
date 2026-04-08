@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { createJobChain, hasActiveJob } from "@/lib/jobs";
+import { createJobChain, hasActiveJob, expireStaleJobs } from "@/lib/jobs";
 
 const digestSchema = z.object({
   projectId: z.string().min(1),
@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
   }
 
   const { projectId } = parsed.data;
+
+  await expireStaleJobs(projectId);
 
   const existing = await hasActiveJob(projectId, "sync_full");
   if (existing) {

@@ -44,10 +44,22 @@ export async function createJobChain(
 }
 
 export async function claimJob(jobId: string) {
-  return prisma.job.update({
-    where: { id: jobId, status: "pending" },
-    data: { status: "running", startedAt: new Date(), attempts: { increment: 1 } },
-  });
+  try {
+    return await prisma.job.update({
+      where: { id: jobId, status: "pending" },
+      data: { status: "running", startedAt: new Date(), attempts: { increment: 1 } },
+    });
+  } catch (err) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code: string }).code === "P2025"
+    ) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 export async function completeJob(jobId: string) {
@@ -86,13 +98,29 @@ export async function getNextPendingJob() {
   });
 }
 
+const STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+
 export async function hasActiveJob(projectId: string, type: string) {
+  const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
   const existing = await prisma.job.findFirst({
     where: {
       projectId,
       type,
       status: { in: ["pending", "running"] },
+      createdAt: { gt: cutoff },
     },
   });
   return existing;
+}
+
+export async function expireStaleJobs(projectId: string) {
+  const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
+  await prisma.job.updateMany({
+    where: {
+      projectId,
+      status: { in: ["pending", "running", "waiting"] },
+      createdAt: { lt: cutoff },
+    },
+    data: { status: "failed", error: "Expired (stale)", doneAt: new Date() },
+  });
 }

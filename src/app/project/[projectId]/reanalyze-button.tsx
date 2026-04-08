@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,20 +11,11 @@ export function ReanalyzeButton({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(false);
   const [roundId, setRoundId] = useState<string | null>(null);
   const [stage, setStage] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cancelledRef = useRef(false);
-
-  const cleanup = useCallback(() => {
-    cancelledRef.current = true;
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  }, []);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!roundId) return;
-
     cancelledRef.current = false;
 
     async function poll() {
@@ -35,42 +26,51 @@ export function ReanalyzeButton({ projectId }: { projectId: string }) {
         const data = await res.json();
 
         if (data.status === "failed") {
-          cleanup();
           setLoading(false);
           toast.error(`Job failed: ${data.error ?? "unknown error"}`);
           return;
         }
 
-        if (data.message === "No pending jobs") {
-          cleanup();
+        if (data.message === "all_done") {
           setLoading(false);
           router.push(`/project/${projectId}/digest?roundId=${roundId}`);
           router.refresh();
+          return;
+        }
+
+        if (data.message === "jobs_running") {
+          setStage(formatJobType(data.runningType));
+          timerRef.current = setTimeout(poll, 2000);
           return;
         }
 
         if (data.hasMore) {
           setStage(formatJobType(data.nextType));
         } else {
-          cleanup();
           setLoading(false);
           router.push(`/project/${projectId}/digest?roundId=${roundId}`);
           router.refresh();
+          return;
         }
       } catch {
         if (!cancelledRef.current) {
-          cleanup();
           setLoading(false);
           toast.error("Job processing failed");
+          return;
         }
+      }
+      if (!cancelledRef.current) {
+        timerRef.current = setTimeout(poll, 2000);
       }
     }
 
     poll();
-    intervalRef.current = setInterval(poll, 3000);
 
-    return cleanup;
-  }, [roundId, projectId, router, cleanup]);
+    return () => {
+      cancelledRef.current = true;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [roundId, projectId, router]);
 
   async function handleReanalyze() {
     setLoading(true);
@@ -117,6 +117,6 @@ function formatJobType(type: string | null | undefined): string {
   switch (type) {
     case "classify": return "Classifying...";
     case "cluster": return "Clustering...";
-    default: return "Finishing...";
+    default: return "Processing...";
   }
 }
