@@ -10,10 +10,15 @@ export function buildFigmaDeepLink(fileKey: string, nodeId: string | null): stri
 }
 
 export async function syncProject(projectId: string, mode: SyncMode, roundId?: string) {
-  const project = await prisma.project.findUniqueOrThrow({
+  const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: { files: true },
   });
+
+  if (!project) {
+    await prisma.job.deleteMany({ where: { projectId } });
+    return { newComments: 0, resolvedComments: 0, errors: [`Project ${projectId} not found`] };
+  }
 
   const token = await getFigmaToken(projectId);
   const results = { newComments: 0, resolvedComments: 0, errors: [] as string[] };

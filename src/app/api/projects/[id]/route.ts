@@ -77,6 +77,7 @@ export async function DELETE(
 
   const { id } = await params;
 
+  await prisma.job.deleteMany({ where: { projectId: id } });
   await prisma.project.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }
