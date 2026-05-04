@@ -30,6 +30,9 @@ interface FigmaFileData {
   lastError: string | null;
   includedPages?: string[];
   includedFrames?: string[];
+  lastSyncFigmaCommentTotal?: number | null;
+  lastSyncImportedCount?: number | null;
+  lastSyncSkippedScopeCount?: number | null;
   _count: { comments: number };
 }
 
@@ -70,6 +73,10 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
 
       setNewUrl("");
       setShowAddInput(false);
+      toast.success("File linked", {
+        description:
+          "Open Scope on the card to choose page(s). Only comments on selected pages are stored.",
+      });
       router.refresh();
     } catch {
       setError("Network error");
@@ -223,6 +230,17 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
             {files.map((file) => {
               const hasError = !!file.lastError;
               const isDeleting = deletingId === file.id;
+              const hasScope =
+                (file.includedPages?.length ?? 0) > 0 ||
+                (file.includedFrames?.length ?? 0) > 0;
+              const figmaTotal = file.lastSyncFigmaCommentTotal ?? null;
+              const skippedScope = file.lastSyncSkippedScopeCount ?? null;
+              const scopeExcludedAll =
+                hasScope &&
+                figmaTotal !== null &&
+                figmaTotal > 0 &&
+                (file.lastSyncImportedCount ?? 0) === 0 &&
+                file._count.comments === 0;
               return (
                 <div key={file.id}>
                   <div className="rounded-xl border border-border/50 bg-background/40 p-3 sm:p-4 flex flex-col gap-3">
@@ -233,10 +251,35 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
                       <div className="min-w-0 flex-1 space-y-1">
                         <p className="text-sm font-medium leading-snug">{file.name}</p>
                         <p className="text-[11px] text-muted-foreground">
-                          {file._count.comments} comments
+                          {hasScope
+                            ? `${file._count.comments} comments in scope`
+                            : `${file._count.comments} comments synced`}
                           {file.lastSyncedAt &&
                             ` · Synced ${new Date(file.lastSyncedAt).toLocaleDateString()}`}
                         </p>
+                        {figmaTotal !== null && (
+                          <p className="text-[10px] text-muted-foreground/90 leading-snug">
+                            Last Figma API: {figmaTotal} comment
+                            {figmaTotal !== 1 ? "s" : ""}
+                            {hasScope && skippedScope !== null && skippedScope > 0
+                              ? ` · ${skippedScope} skipped by scope`
+                              : ""}
+                          </p>
+                        )}
+                        {!hasScope && (
+                          <p className="text-[10px] text-muted-foreground">
+                            Optional: use Scope to limit which pages sync.
+                          </p>
+                        )}
+                        {scopeExcludedAll && (
+                          <p className="text-[11px] text-amber-800 dark:text-amber-200 flex gap-1 items-start mt-0.5">
+                            <AlertTriangle className="size-3 shrink-0 mt-0.5" />
+                            <span>
+                              Every Figma comment was outside your selected pages or frames. Adjust
+                              Scope or pick pages where comments live.
+                            </span>
+                          </p>
+                        )}
                         {hasError && (
                           <p className="text-[11px] text-destructive flex flex-wrap items-center gap-x-1 gap-y-0.5">
                             <AlertTriangle className="size-3 shrink-0" />

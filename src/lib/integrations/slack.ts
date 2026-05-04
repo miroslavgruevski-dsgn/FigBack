@@ -112,16 +112,42 @@ function buildDigestBlocks(payload: DigestPayload): SlackBlock[] {
   return blocks;
 }
 
-export async function postSlackSyncSummary(
-  webhookUrl: string,
-  projects: { name: string; url: string }[]
-): Promise<{ ok: boolean; error?: string }> {
-  const count = projects.length;
-  const fallback = `FigBack: checking ${count} project${count !== 1 ? "s" : ""} for new comments`;
+export type SlackWatchProjectLine = {
+  name: string;
+  url: string;
+  /** Net new Comment rows saved vs before sync (roots + replies). */
+  newCommentRows: number;
+  syncErrors?: string[];
+};
 
-  const projectList = projects
-    .slice(0, 10)
-    .map((p) => `\u2022 <${p.url}|${p.name}>`)
+export async function postSlackWatchOverview(
+  webhookUrl: string,
+  lines: SlackWatchProjectLine[]
+): Promise<{ ok: boolean; error?: string }> {
+  const count = lines.length;
+  const anyNew = lines.some((l) => l.newCommentRows > 0);
+  const fallback = anyNew
+    ? `FigBack: daily sync — new comment rows in at least one project`
+    : `FigBack: daily sync — no new comment rows (${count} project${count !== 1 ? "s" : ""})`;
+
+  const summaryLine = anyNew
+    ? `:inbox_tray: *Daily comment sync (watch mode)* — at least one project has new rows`
+    : `:white_check_mark: *Daily comment sync (watch mode)* — no new comment rows`;
+
+  const projectList = lines
+    .slice(0, 15)
+    .map((p) => {
+      const n = p.newCommentRows;
+      const tag =
+        n > 0
+          ? `*+${n}* new row${n !== 1 ? "s" : ""}`
+          : "no new rows";
+      const err =
+        p.syncErrors?.length && p.syncErrors[0]
+          ? ` _(${p.syncErrors[0].slice(0, 120)})_`
+          : "";
+      return `\u2022 <${p.url}|${p.name}> \u2014 ${tag}${err}`;
+    })
     .join("\n");
 
   const blocks: SlackBlock[] = [
@@ -129,12 +155,8 @@ export async function postSlackSyncSummary(
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `:mag: *Checking ${count} project${count !== 1 ? "s" : ""} for new Figma comments*`,
+        text: [summaryLine, "", projectList].join("\n"),
       },
-    },
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: projectList },
     },
   ];
 
@@ -152,4 +174,14 @@ export async function postSlackSyncSummary(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
   }
+}
+
+export async function postSlackSyncSummary(
+  webhookUrl: string,
+  projects: { name: string; url: string }[]
+): Promise<{ ok: boolean; error?: string }> {
+  return postSlackWatchOverview(
+    webhookUrl,
+    projects.map((p) => ({ ...p, newCommentRows: 0 }))
+  );
 }

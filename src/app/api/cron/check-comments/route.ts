@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { syncProject } from "@/lib/figma/sync";
 import { sendPushToAll } from "@/lib/push/send";
-import { postSlackSyncSummary } from "@/lib/integrations/slack";
+import { postSlackWatchOverview } from "@/lib/integrations/slack";
 
 export const maxDuration = 60;
 
@@ -22,19 +22,38 @@ export async function POST(req: NextRequest) {
     select: { id: true, name: true },
   });
 
-  const syncedProjects: { name: string; id: string }[] = [];
+  const watchLines: {
+    name: string;
+    id: string;
+    newCommentRows: number;
+    syncErrors: string[];
+  }[] = [];
   const errors: string[] = [];
 
   for (const project of projects) {
+    const lineSyncErrors: string[] = [];
+    let newCommentRows = 0;
     try {
-      await syncProject(project.id, "watch");
-      syncedProjects.push(project);
+      const result = await syncProject(project.id, "watch");
+      newCommentRows = result.newComments;
+      for (const e of result.errors) {
+        lineSyncErrors.push(e);
+        errors.push(`${project.name}: ${e}`);
+      }
     } catch (err) {
-      errors.push(`${project.name}: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      lineSyncErrors.push(msg);
+      errors.push(`${project.name}: ${msg}`);
     }
+    watchLines.push({
+      name: project.name,
+      id: project.id,
+      newCommentRows,
+      syncErrors: lineSyncErrors,
+    });
   }
 
-  const synced = syncedProjects.length;
+  const synced = watchLines.length;
 
   if (config) {
     await prisma.teamConfig.update({
@@ -42,20 +61,35 @@ export async function POST(req: NextRequest) {
       data: { lastCronRunAt: new Date() },
     });
 
-    if (synced > 0 && config.notifyNewComments) {
+    const anyNew = watchLines.some((l) => l.newCommentRows > 0);
+    if (synced > 0 && config.notifyNewComments && anyNew) {
       await sendPushToAll({
-        title: "Checking for new comments",
-        body: `Synced ${synced} project${synced !== 1 ? "s" : ""} with Figma`,
+        title: "New Figma comments synced",
+        body: `${watchLines.filter((l) => l.newCommentRows > 0).length} project(s) have new rows`,
         url: "/",
       });
     }
 
     if (synced > 0 && config.autoPostSlack && config.slackWebhookUrl) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-      await postSlackSyncSummary(
+      const slackResult = await postSlackWatchOverview(
         config.slackWebhookUrl,
-        syncedProjects.map((p) => ({ name: p.name, url: `${appUrl}/project/${p.id}` }))
-      ).catch(() => {});
+        watchLines.map((p) => ({
+          name: p.name,
+          url: `${appUrl}/project/${p.id}`,
+          newCommentRows: p.newCommentRows,
+          syncErrors: p.syncErrors.length ? p.syncErrors : undefined,
+        }))
+      );
+      if (!slackResult.ok) {
+        await prisma.teamConfig.update({
+          where: { id: "default" },
+          data: {
+            lastIntegrationError: slackResult.error ?? "Slack post failed",
+            lastIntegrationErrorAt: new Date(),
+          },
+        });
+      }
     }
   }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { createJobChain, hasActiveJob, expireStaleJobs } from "@/lib/jobs";
+import { createJobChain, expireStaleJobs, findActiveJobWithPayload } from "@/lib/jobs";
 import { buildFigmaDeepLink } from "@/lib/figma/sync";
 import type { Prisma } from "@prisma/client";
 
@@ -26,9 +26,15 @@ export async function POST(req: NextRequest) {
 
   await expireStaleJobs(projectId);
 
-  const active = await hasActiveJob(projectId, "classify");
+  const active = await findActiveJobWithPayload(projectId, "classify");
   if (active) {
-    return NextResponse.json({ message: "Re-analysis already in progress", jobId: active.id });
+    const roundId =
+      typeof active.payload.roundId === "string" ? active.payload.roundId : undefined;
+    return NextResponse.json({
+      message: "Re-analysis already in progress",
+      jobId: active.id,
+      roundId,
+    });
   }
 
   // Reset processed flag so comments can be re-carded

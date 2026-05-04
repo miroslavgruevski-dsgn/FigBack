@@ -262,6 +262,13 @@ export async function POST(req: NextRequest) {
               if (!slackResult.ok) {
                 const { logger } = await import("@/lib/logger");
                 logger.error("Slack digest post failed", { roundId: payload.roundId, error: slackResult.error });
+                await prisma.teamConfig.update({
+                  where: { id: "default" },
+                  data: {
+                    lastIntegrationError: `Slack: ${slackResult.error ?? "post failed"}`,
+                    lastIntegrationErrorAt: new Date(),
+                  },
+                }).catch(() => {});
               }
             }
 
@@ -304,6 +311,13 @@ export async function POST(req: NextRequest) {
               if (!confResult.ok) {
                 const { logger } = await import("@/lib/logger");
                 logger.error("Confluence push failed", { roundId: payload.roundId, error: confResult.error });
+                await prisma.teamConfig.update({
+                  where: { id: "default" },
+                  data: {
+                    lastIntegrationError: `Confluence: ${confResult.error ?? "push failed"}`,
+                    lastIntegrationErrorAt: new Date(),
+                  },
+                }).catch(() => {});
               }
             }
 

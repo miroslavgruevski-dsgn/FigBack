@@ -122,17 +122,38 @@ export async function getNextPendingJob() {
 
 const STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
 
+export function jobActivityCutoff(): Date {
+  return new Date(Date.now() - STALE_THRESHOLD_MS);
+}
+
 export async function hasActiveJob(projectId: string, type: string) {
-  const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
   const existing = await prisma.job.findFirst({
     where: {
       projectId,
       type,
       status: { in: ["pending", "running"] },
-      createdAt: { gt: cutoff },
+      createdAt: { gt: jobActivityCutoff() },
     },
   });
   return existing;
+}
+
+/** Active job (pending/running, not stale) with payload for roundId, etc. */
+export async function findActiveJobWithPayload(
+  projectId: string,
+  type: string
+): Promise<{ id: string; payload: Record<string, unknown> } | null> {
+  const j = await prisma.job.findFirst({
+    where: {
+      projectId,
+      type,
+      status: { in: ["pending", "running"] },
+      createdAt: { gt: jobActivityCutoff() },
+    },
+    select: { id: true, payload: true },
+  });
+  if (!j) return null;
+  return { id: j.id, payload: j.payload as Record<string, unknown> };
 }
 
 export async function expireStaleJobs(projectId: string) {

@@ -146,10 +146,19 @@ export async function verifyToken(
   }
 }
 
+/**
+ * API key for Figma REST: file key or branch key.
+ * Branch URLs: use the segment after /branch/ (see Figma REST docs).
+ */
 export function extractFileKey(url: string): string | null {
+  const branch = url.match(
+    /figma\.com\/(?:file|design)\/([a-zA-Z0-9]+)\/branch\/([a-zA-Z0-9]+)/i
+  );
+  if (branch) return branch[2];
+
   const patterns = [
-    /figma\.com\/(?:file|design)\/([a-zA-Z0-9]+)/,
-    /figma\.com\/proto\/([a-zA-Z0-9]+)/,
+    /figma\.com\/(?:file|design)\/([a-zA-Z0-9]+)/i,
+    /figma\.com\/proto\/([a-zA-Z0-9]+)/i,
   ];
   for (const pattern of patterns) {
     const match = url.match(pattern);

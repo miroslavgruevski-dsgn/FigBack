@@ -11,6 +11,7 @@ import { FileManager } from "./file-manager";
 import { DeleteAnalysisButton } from "./delete-analysis-button";
 import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/error-state";
+import { ProjectAlerts, type ProjectAlertItem } from "@/components/project/project-alerts";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,9 @@ interface ProjectData {
     lastError: string | null;
     includedPages?: string[];
     includedFrames?: string[];
+    lastSyncFigmaCommentTotal: number | null;
+    lastSyncImportedCount: number | null;
+    lastSyncSkippedScopeCount: number | null;
     _count: { comments: number };
   }[];
   rounds: RoundWithFiles[];
@@ -52,6 +56,8 @@ export default async function ProjectPage({
   let project: ProjectData | null = null;
   let dbError = false;
   let newCommentCount = 0;
+  let projectAlerts: ProjectAlertItem[] = [];
+  let unresolvedRootCount = 0;
 
   try {
     const { prisma } = await import("@/lib/db");
@@ -94,6 +100,66 @@ export default async function ProjectPage({
           },
         });
       }
+
+      const [failedJob, teamCfg, ur] = await Promise.all([
+        prisma.job.findFirst({
+          where: { projectId, status: "failed" },
+          orderBy: { doneAt: "desc" },
+          select: { error: true, type: true },
+        }),
+        prisma.teamConfig.findUnique({
+          where: { id: "default" },
+          select: {
+            skipLlm: true,
+            llmApiKey: true,
+            lastIntegrationError: true,
+            lastIntegrationErrorAt: true,
+            cronEnabled: true,
+          },
+        }),
+        prisma.comment.count({
+          where: { file: { projectId }, parentId: null, resolvedAt: null },
+        }),
+      ]);
+      unresolvedRootCount = ur;
+
+      const alertList: ProjectAlertItem[] = [];
+      if (failedJob?.error) {
+        alertList.push({
+          key: "job-failed",
+          title: "A background job failed",
+          detail: failedJob.error.slice(0, 400),
+        });
+      }
+      if (teamCfg?.lastIntegrationError) {
+        alertList.push({
+          key: "integration",
+          title: "Integration issue (Slack or Confluence)",
+          detail: teamCfg.lastIntegrationError,
+          href: "/settings",
+          linkText: "Review in settings",
+        });
+      }
+      if (teamCfg && !teamCfg.skipLlm && !teamCfg.llmApiKey) {
+        alertList.push({
+          key: "llm-key",
+          title: "LLM API key not saved",
+          detail:
+            "Add a key under Settings, set a provider env var on the server, or turn on Skip LLM for grouping without classification.",
+          href: "/settings",
+          linkText: "Open settings",
+        });
+      }
+      if (teamCfg && teamCfg.cronEnabled === false) {
+        alertList.push({
+          key: "cron-off",
+          title: "Daily auto-check for new comments is off",
+          detail: "Enable it in Settings if you want scheduled watch-mode syncs.",
+          href: "/settings",
+          linkText: "Settings",
+        });
+      }
+      projectAlerts = alertList;
     }
   } catch {
     dbError = true;
@@ -120,7 +186,11 @@ export default async function ProjectPage({
 
   const totalComments = project.files.reduce((sum, f) => sum + f._count.comments, 0);
   const hasTokenError = project.files.some(
-    (f) => f.lastError && (/token/i.test(f.lastError) || /403/.test(f.lastError))
+    (f) =>
+      f.lastError &&
+      (/token/i.test(f.lastError) ||
+        /403|401/.test(f.lastError) ||
+        /rejected/i.test(f.lastError))
   );
 
   return (
@@ -157,6 +227,8 @@ export default async function ProjectPage({
         </div>
       )}
 
+      <ProjectAlerts alerts={projectAlerts} />
+
       <div className="mt-6" id="figma-token-section">
         <FigmaTokenField
           projectId={projectId}
@@ -174,8 +246,11 @@ export default async function ProjectPage({
       <section className="mt-8">
         <h2 className="font-heading text-base font-semibold mb-3">Analyses</h2>
         <p className="text-xs text-muted-foreground mb-3">
-          Each row shows how many comments were included in that run. File cards above show total
-          comments synced from Figma.
+          Each row counts threads added to that analysis (unresolved roots only). File cards show
+          comments stored in scope.{" "}
+          {unresolvedRootCount > 0
+            ? `${unresolvedRootCount} unresolved root thread${unresolvedRootCount !== 1 ? "s" : ""} in this project right now.`
+            : "No unresolved root threads (all may be resolved in Figma)."}
         </p>
         {project.rounds.length === 0 ? (
           <div className="glass rounded-lg p-8 text-center">
@@ -191,40 +266,59 @@ export default async function ProjectPage({
               {project.rounds.map((round, idx) => (
                 <div
                   key={round.id}
-                  className="glass-tint rounded-lg p-4 pl-8 flex items-stretch gap-2 hover-lift relative"
+                  className="glass-tint hover-lift relative flex items-stretch gap-0 rounded-lg py-3 pl-8 pr-3 sm:pr-4"
                 >
                   <div
-                    className={`absolute left-[7px] top-1/2 -translate-y-1/2 size-[10px] rounded-full border-2 border-primary ${idx === 0 ? "bg-primary" : "bg-background"}`}
+                    className={`absolute left-[7px] top-1/2 size-[10px] -translate-y-1/2 rounded-full border-2 border-primary ${idx === 0 ? "bg-primary" : "bg-background"}`}
                   />
                   <Link
                     href={`/project/${projectId}/digest?roundId=${round.id}`}
-                    className="min-w-0 flex-1 flex items-center justify-between gap-3 py-0.5 rounded-md outline-offset-2 focus-visible:ring-2 focus-visible:ring-ring"
+                    className="min-w-0 flex-1 rounded-md py-0.5 pr-2 outline-offset-2 focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">{round.name ?? "Unnamed analysis"}</p>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                        <MessageSquare className="size-3 shrink-0" />
+                    <p className="flex items-center gap-2 text-sm font-medium">
+                      <span className="min-w-0 truncate">
+                        {round.name ?? "Unnamed analysis"}
+                      </span>
+                      <Sparkles
+                        className="size-4 shrink-0 text-primary/90"
+                        aria-hidden
+                      />
+                    </p>
+                    <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <MessageSquare className="size-3 shrink-0" />
+                      <span>
                         {round.commentCount} in this analysis ·{" "}
                         {new Date(round.syncedAt).toLocaleDateString()}
+                      </span>
+                    </p>
+                    {round.commentCount === 0 && (
+                      <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
+                        Zero usually means every root thread was resolved in Figma or already used in
+                        a prior analysis. Only unresolved roots are included.
                       </p>
-                      {round.files && round.files.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {round.files.map((f) => (
-                            <Badge key={f.name} variant="secondary" className="text-[10px] px-1.5 py-0 gap-1">
-                              {f.name} ({f.commentCount})
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <Sparkles className="size-4 text-primary shrink-0" aria-hidden />
+                    )}
+                    {round.files && round.files.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {round.files.map((f) => (
+                          <Badge
+                            key={f.name}
+                            variant="secondary"
+                            className="gap-1 px-1.5 py-0 text-[10px]"
+                          >
+                            {f.name} ({f.commentCount})
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                   </Link>
-                  <DeleteAnalysisButton
-                    projectId={projectId}
-                    roundId={round.id}
-                    analysisLabel={round.name ?? "Analysis"}
-                    afterDelete="refresh"
-                  />
+                  <div className="flex shrink-0 items-center self-center border-l border-border/50 pl-3 sm:pl-3.5">
+                    <DeleteAnalysisButton
+                      projectId={projectId}
+                      roundId={round.id}
+                      analysisLabel={round.name ?? "Analysis"}
+                      afterDelete="refresh"
+                    />
+                  </div>
                 </div>
               ))}
             </div>

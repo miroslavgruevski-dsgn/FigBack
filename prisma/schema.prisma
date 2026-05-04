@@ -74,6 +74,12 @@ model FigmaFile {
   lastError     String?
   includedPages  String[]  @default([])
   includedFrames String[]  @default([])
+  /** Last sync: raw comment count from Figma GET /comments */
+  lastSyncFigmaCommentTotal Int?
+  /** Rows written or updated in DB for that run (upserts attempted after scope filter) */
+  lastSyncImportedCount     Int?
+  /** Comments skipped due to page/frame scope */
+  lastSyncSkippedScopeCount Int?
   comments       Comment[]
 
   @@index([projectId])
@@ -224,6 +230,8 @@ model TeamConfig {
   skipLlm            Boolean   @default(false)
   figmaAccessToken   String?
   lastCronRunAt      DateTime?
+  lastIntegrationError   String?
+  lastIntegrationErrorAt DateTime?
 }
 
 model PushSubscription {

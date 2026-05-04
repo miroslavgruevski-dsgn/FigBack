@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Settings, Loader2, Key, ExternalLink } from "lucide-react";
+import { Settings, Loader2, Key, ExternalLink, AlertTriangle, Zap } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -26,6 +27,8 @@ interface TeamConfig {
   notifyNewComments: boolean;
   notifySyncComplete: boolean;
   archiveDays: number;
+  lastIntegrationError?: string | null;
+  lastIntegrationErrorAt?: string | null;
 }
 
 const envKeyMap: Record<string, string> = {
@@ -44,6 +47,7 @@ export default function SettingsPage() {
   const [config, setConfig] = useState<TeamConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [llmTestLoading, setLlmTestLoading] = useState(false);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -81,6 +85,25 @@ export default function SettingsPage() {
       toast.error("Failed to save settings");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function testLlmConnection() {
+    setLlmTestLoading(true);
+    try {
+      const res = await fetch("/api/settings/test-llm", { method: "POST" });
+      const data = (await res.json()) as { ok?: boolean; skipped?: boolean; error?: string };
+      if (data.skipped) {
+        toast.message("LLM is disabled (Skip LLM is on)");
+      } else if (data.ok) {
+        toast.success("LLM connection OK");
+      } else {
+        toast.error(data.error ?? "LLM check failed");
+      }
+    } catch {
+      toast.error("Could not reach LLM test");
+    } finally {
+      setLlmTestLoading(false);
     }
   }
 
@@ -131,6 +154,17 @@ export default function SettingsPage() {
       </div>
 
       <div className="mt-8 space-y-4">
+        {config.lastIntegrationError && (
+          <div className="glass rounded-lg border border-destructive/25 bg-destructive/5 p-4 text-sm">
+            <div className="flex gap-2">
+              <AlertTriangle className="size-4 shrink-0 text-destructive mt-0.5" />
+              <div>
+                <p className="font-medium text-foreground">Last integration error</p>
+                <p className="mt-1 text-xs text-muted-foreground">{config.lastIntegrationError}</p>
+              </div>
+            </div>
+          </div>
+        )}
         <SettingsCard
           title="Figma"
           description="Connect to the Figma API to sync comments from your design files."
@@ -158,7 +192,9 @@ export default function SettingsPage() {
                   <a href="https://www.figma.com/developers/api#access-tokens" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">
                     personal access token
                   </a>
-                  {" "}with read access to your design files. Individual projects can override this in their settings.
+                  {" "}with read access to files and{" "}
+                  <strong className="font-medium text-foreground">file_comments:read</strong> so
+                  comments can sync (REST Tier 2).
                 </span>
               </p>
             </div>
@@ -211,7 +247,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          <div className="mt-3 flex items-center gap-3">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
             <Switch
               checked={config.skipLlm}
               onCheckedChange={(checked) => save({ skipLlm: checked })}
@@ -220,6 +256,23 @@ export default function SettingsPage() {
             <Label htmlFor="skip-llm" className="text-sm">
               Skip LLM (manual classification only)
             </Label>
+            {!config.skipLlm && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-lg h-8 gap-1.5 text-xs"
+                disabled={llmTestLoading}
+                onClick={() => void testLlmConnection()}
+              >
+                {llmTestLoading ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Zap className="size-3.5" />
+                )}
+                Test LLM
+              </Button>
+            )}
           </div>
 
           {config.skipLlm && (
@@ -267,9 +320,12 @@ export default function SettingsPage() {
                 disabled={!slackConnected}
               />
               <Label htmlFor="auto-slack" className="text-sm">
-                Auto-post when new comments detected
+                Post digest to Slack after analysis and daily watch summary
               </Label>
             </div>
+            <p className="text-[11px] text-muted-foreground pl-1">
+              Digest posts after clustering. Daily cron uses the same webhook for per-project new-comment counts (watch mode).
+            </p>
           </div>
         </SettingsCard>
 
@@ -345,6 +401,10 @@ export default function SettingsPage() {
               <Switch checked={config.cronEnabled} onCheckedChange={(checked) => save({ cronEnabled: checked })} id="cron" />
               <Label htmlFor="cron" className="text-sm">Auto-check for new comments (daily)</Label>
             </div>
+            <p className="text-[11px] text-muted-foreground pl-1">
+              Scheduled on the host (e.g. Vercel cron to <code className="rounded bg-muted px-1 py-0.5 text-[10px]">/api/cron/check-comments</code> with{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-[10px]">CRON_SECRET</code>). Uses watch-mode sync.
+            </p>
             <div className="flex items-center gap-3">
               <Switch checked={config.notifyNewComments} onCheckedChange={(checked) => save({ notifyNewComments: checked })} id="notify-comments" />
               <Label htmlFor="notify-comments" className="text-sm">Push notification when sync starts</Label>

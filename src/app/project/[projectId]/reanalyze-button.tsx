@@ -24,8 +24,19 @@ export function ReanalyzeButton({ projectId }: { projectId: string }) {
 
       if (!res.ok) throw new Error("Failed to start re-analysis");
 
-      const data = (await res.json()) as { roundId: string };
-      toast.success("Re-analysis started!");
+      const data = (await res.json()) as { roundId?: string; message?: string };
+      if (!data.roundId) {
+        toast.error("Could not start re-analysis. Try again in a moment.");
+        router.refresh();
+        return;
+      }
+      if (data.message?.includes("already in progress")) {
+        toast.message("Re-analysis already running", {
+          description: "Finishing the current run.",
+        });
+      } else {
+        toast.success("Re-analysis started!");
+      }
       const pollResult = await runJobQueueUntilIdle({
         onProgress: (label) => setStage(label),
       });

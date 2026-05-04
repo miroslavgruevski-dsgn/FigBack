@@ -21,14 +21,15 @@ export function DeleteAnalysisButton({
   analysisLabel,
   afterDelete,
   size = "sm",
-  variant = "ghost",
+  variant = "list",
 }: {
   projectId: string;
   roundId: string;
   analysisLabel: string;
   afterDelete?: "refresh" | "go-project";
   size?: "sm" | "icon";
-  variant?: "ghost" | "outline";
+  /** list: soft destructive chip (project page). outline: bordered icon (digest header). */
+  variant?: "list" | "outline";
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -62,12 +63,14 @@ export function DeleteAnalysisButton({
         render={
           <Button
             type="button"
-            variant={variant}
+            variant={variant === "outline" ? "outline" : "destructive"}
             size={size === "icon" ? "icon-sm" : "sm"}
             className={
-              size === "icon"
-                ? "text-muted-foreground hover:text-destructive shrink-0"
-                : "text-destructive shrink-0 gap-1"
+              variant === "outline" && size === "icon"
+                ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:border-destructive/30 focus-visible:ring-destructive/25"
+                : variant === "list"
+                  ? "shrink-0 gap-1 border-destructive/20 bg-destructive/[0.06] hover:bg-destructive/15 focus-visible:border-destructive/40 focus-visible:ring-destructive/25"
+                  : undefined
             }
             aria-label={`Delete analysis ${analysisLabel}`}
           >

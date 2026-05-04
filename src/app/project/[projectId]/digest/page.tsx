@@ -293,9 +293,13 @@ export default async function DigestPage({
 
       <div className="mt-8">
         {clusters.length === 0 ? (
-          <div className="glass rounded-lg p-8 text-center">
+          <div className="glass rounded-lg p-8 text-center max-w-lg mx-auto">
             <Filter className="size-6 mx-auto text-muted-foreground" />
-            <p className="mt-3 text-sm text-muted-foreground">No issues found in this analysis.</p>
+            <p className="mt-3 text-sm text-muted-foreground">
+              {round.commentCount === 0
+                ? "No threads were added to this analysis. Usually every root comment is resolved in Figma, or threads were already used in a previous run. The product only includes unresolved root threads for new cards."
+                : "No issues found in this analysis."}
+            </p>
           </div>
         ) : (
           <SectionedClusters clusters={clusters} />

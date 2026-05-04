@@ -28,8 +28,23 @@ export function GenerateDigestButton({
 
       if (!res.ok) throw new Error("Failed to start digest");
 
-      const data = (await res.json()) as { roundId: string };
-      toast.success("Analysis started!");
+      const data = (await res.json()) as {
+        roundId?: string;
+        message?: string;
+        jobId?: string;
+      };
+      if (!data.roundId) {
+        toast.error("Could not start analysis. Try again in a moment.");
+        router.refresh();
+        return;
+      }
+      if (data.message?.includes("already in progress")) {
+        toast.message("Analysis already running", {
+          description: "Finishing the current run. You can open it when the button stops loading.",
+        });
+      } else {
+        toast.success("Analysis started!");
+      }
       const pollResult = await runJobQueueUntilIdle({
         onProgress: (label) => setStage(label),
       });

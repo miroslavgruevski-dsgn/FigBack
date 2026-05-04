@@ -14,6 +14,7 @@ import {
 } from "./map-comments";
 import { getFigmaToken } from "./token";
 import { logger } from "@/lib/logger";
+import { FigmaApiError, userMessageForFigmaHttpStatus } from "@/lib/errors";
 import type { FigmaComment, FigmaReaction, SyncMode } from "@/types/figma";
 
 function reactionsSyncCap(): number {
@@ -63,9 +64,15 @@ export async function syncProject(projectId: string, mode: SyncMode, roundId?: s
 
   for (const file of project.files) {
     try {
-      await syncFile(file.id, file.fileKey, token, mode);
+      const stats = await syncFile(file.id, file.fileKey, token, mode);
+      results.newComments += stats.newRowsInDb;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message =
+        err instanceof FigmaApiError
+          ? userMessageForFigmaHttpStatus(err.status)
+          : err instanceof Error
+            ? err.message
+            : String(err);
       results.errors.push(`${file.name}: ${message}`);
 
       await prisma.figmaFile.update({
@@ -161,7 +168,14 @@ async function syncFile(
   fileKey: string,
   token: string,
   mode: SyncMode
-): Promise<void> {
+): Promise<{
+  figmaTotal: number;
+  imported: number;
+  skippedScope: number;
+  newRowsInDb: number;
+}> {
+  const beforeRowCount = await prisma.comment.count({ where: { fileId } });
+
   const dbFile = await prisma.figmaFile.findUniqueOrThrow({
     where: { id: fileId },
     select: { includedPages: true, includedFrames: true },
@@ -224,13 +238,16 @@ async function syncFile(
   }
 
   const upsertOps = [];
+  let skippedScope = 0;
 
   for (const { fc, mapped } of rows) {
     if (hasPageFilter && mapped.pageId && !pageFilter.has(mapped.pageId)) {
+      skippedScope++;
       continue;
     }
 
     if (hasFrameFilter && mapped.frameId && !frameFilter.has(mapped.frameId)) {
+      skippedScope++;
       continue;
     }
 
@@ -264,6 +281,26 @@ async function syncFile(
     await prisma.$transaction(upsertOps.slice(i, i + BATCH));
   }
 
+  const afterRowCount = await prisma.comment.count({ where: { fileId } });
+  const newRowsInDb = afterRowCount - beforeRowCount;
+
+  await prisma.figmaFile.update({
+    where: { id: fileId },
+    data: {
+      lastSyncFigmaCommentTotal: figmaComments.length,
+      lastSyncImportedCount: upsertOps.length,
+      lastSyncSkippedScopeCount: skippedScope,
+    },
+  });
+
+  if (
+    figmaComments.length > 0 &&
+    upsertOps.length === 0 &&
+    (hasPageFilter || hasFrameFilter)
+  ) {
+    logger.warn("Figma returned comments but scope excluded all for this file", { fileId });
+  }
+
   if (mode === "full") {
     const cap = reactionsSyncCap();
     const roots = await prisma.comment.findMany({
@@ -291,4 +328,11 @@ async function syncFile(
       }
     }
   }
+
+  return {
+    figmaTotal: figmaComments.length,
+    imported: upsertOps.length,
+    skippedScope,
+    newRowsInDb,
+  };
 }
