@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, Loader2 } from "lucide-react";
+import { parseResponseJson } from "@/lib/parse-json-response";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
@@ -38,14 +39,10 @@ export function DeleteProjectButton({
         setDeleting(false);
         return;
       }
-      let message = "Could not delete project.";
-      try {
-        const data = (await res.json()) as { error?: string };
-        if (typeof data.error === "string") message = data.error;
-      } catch {
-        /* ignore */
-      }
-      toast.error(message);
+      const data = await parseResponseJson<{ error?: string }>(res);
+      toast.error(
+        typeof data?.error === "string" ? data.error : "Could not delete project."
+      );
     } catch {
       toast.error("Could not delete project. Check your connection and database.");
     }

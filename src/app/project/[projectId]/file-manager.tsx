@@ -19,6 +19,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { runJobQueueUntilIdle } from "@/lib/jobs/poll-client";
+import { parseResponseJson } from "@/lib/parse-json-response";
 import { toast } from "sonner";
 
 interface FigmaFileData {
@@ -66,8 +67,8 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        setError(data.error ?? "Failed to add file");
+        const data = await parseResponseJson<{ error?: string }>(res);
+        setError(data?.error ?? "Failed to add file");
         return;
       }
 
@@ -114,7 +115,7 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      const data = (await parseResponseJson<{ error?: string }>(res)) ?? {};
       if (!res.ok) {
         setError(data.error ?? "Sync failed");
         return;
@@ -417,11 +418,12 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}/files/pages?fileId=${file.id}`)
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) throw new Error("Failed to fetch pages");
-        return res.json();
+        return parseResponseJson<{ pages: PageNode[] }>(res);
       })
       .then((data) => {
+        if (!data?.pages) throw new Error("Failed to fetch pages");
         setPages(data.pages);
         setLoading(false);
       })

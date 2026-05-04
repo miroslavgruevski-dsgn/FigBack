@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Download, Share2, Link2, FileText, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { parseResponseJson } from "@/lib/parse-json-response";
 import { toast } from "sonner";
 
 interface DigestActionsProps {
@@ -25,12 +26,17 @@ export function DigestActions({ projectId, roundId }: DigestActionsProps) {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error ?? "Failed to create share link");
+        const data = await parseResponseJson<{ error?: string }>(res);
+        toast.error(data?.error ?? "Failed to create share link");
         return;
       }
 
-      const { shareUrl } = await res.json();
+      const body = await parseResponseJson<{ shareUrl?: string }>(res);
+      const shareUrl = body?.shareUrl;
+      if (!shareUrl) {
+        toast.error("Failed to create share link");
+        return;
+      }
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
       toast.success("Share link copied to clipboard");

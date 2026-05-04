@@ -7,6 +7,7 @@ import { ArrowLeft, Plus, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { parseResponseJson } from "@/lib/parse-json-response";
 import { toast } from "sonner";
 
 export default function NewProjectPage() {
@@ -43,8 +44,8 @@ export default function NewProjectPage() {
         body: JSON.stringify({ name: name.trim(), urls: validUrls }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to create project");
+        const err = await parseResponseJson<{ error?: string }>(res);
+        throw new Error(err?.error ?? "Failed to create project");
       }
       toast.success("Project created!");
       router.push("/");

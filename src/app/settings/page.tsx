@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { parseResponseJson } from "@/lib/parse-json-response";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -53,7 +54,8 @@ export default function SettingsPage() {
     try {
       const res = await fetch("/api/settings");
       if (res.ok) {
-        setConfig(await res.json());
+        const data = await parseResponseJson<TeamConfig>(res);
+        if (data) setConfig(data);
       }
     } catch {
       // DB not connected
@@ -75,8 +77,8 @@ export default function SettingsPage() {
         body: JSON.stringify(updates),
       });
       if (res.ok) {
-        const updated = await res.json();
-        setConfig(updated);
+        const updated = await parseResponseJson<TeamConfig>(res);
+        if (updated) setConfig(updated);
         toast.success("Settings saved");
       } else {
         toast.error("Failed to save settings");
@@ -92,8 +94,14 @@ export default function SettingsPage() {
     setLlmTestLoading(true);
     try {
       const res = await fetch("/api/settings/test-llm", { method: "POST" });
-      const data = (await res.json()) as { ok?: boolean; skipped?: boolean; error?: string };
-      if (data.skipped) {
+      const data = await parseResponseJson<{
+        ok?: boolean;
+        skipped?: boolean;
+        error?: string;
+      }>(res);
+      if (!data) {
+        toast.error("LLM check failed");
+      } else if (data.skipped) {
         toast.message("LLM is disabled (Skip LLM is on)");
       } else if (data.ok) {
         toast.success("LLM connection OK");

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { runJobQueueUntilIdle } from "@/lib/jobs/poll-client";
+import { parseResponseJson } from "@/lib/parse-json-response";
 import { toast } from "sonner";
 
 export function GenerateDigestButton({
@@ -28,11 +29,11 @@ export function GenerateDigestButton({
 
       if (!res.ok) throw new Error("Failed to start digest");
 
-      const data = (await res.json()) as {
+      const data = (await parseResponseJson<{
         roundId?: string;
         message?: string;
         jobId?: string;
-      };
+      }>(res)) ?? {};
       if (!data.roundId) {
         toast.error("Could not start analysis. Try again in a moment.");
         router.refresh();

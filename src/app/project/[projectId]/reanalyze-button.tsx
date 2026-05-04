@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { runJobQueueUntilIdle } from "@/lib/jobs/poll-client";
+import { parseResponseJson } from "@/lib/parse-json-response";
 import { toast } from "sonner";
 
 export function ReanalyzeButton({ projectId }: { projectId: string }) {
@@ -24,7 +25,8 @@ export function ReanalyzeButton({ projectId }: { projectId: string }) {
 
       if (!res.ok) throw new Error("Failed to start re-analysis");
 
-      const data = (await res.json()) as { roundId?: string; message?: string };
+      const data =
+        (await parseResponseJson<{ roundId?: string; message?: string }>(res)) ?? {};
       if (!data.roundId) {
         toast.error("Could not start re-analysis. Try again in a moment.");
         router.refresh();

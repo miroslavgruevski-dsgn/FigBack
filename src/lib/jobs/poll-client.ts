@@ -1,5 +1,7 @@
 /** Client-side: drain the job queue by repeatedly calling POST /api/jobs/run. */
 
+import { parseResponseJson } from "@/lib/parse-json-response";
+
 const POLL_INTERVAL_MS = 2000;
 const DEFAULT_MAX_WAIT_MS = 15 * 60 * 1000;
 
@@ -32,14 +34,17 @@ export async function runJobQueueUntilIdle(options?: {
 
   while (Date.now() - start < maxWait) {
     const res = await fetch("/api/jobs/run", { method: "POST" });
-    const data = (await res.json()) as {
+    const data = await parseResponseJson<{
       message?: string;
       status?: string;
       hasMore?: boolean;
       nextType?: string | null;
       runningType?: string;
       error?: string;
-    };
+    }>(res);
+    if (!data) {
+      return { ok: false, error: "Unexpected server response" };
+    }
 
     if (data.status === "failed" || (res.status >= 400 && data.error)) {
       return { ok: false, error: data.error ?? "Job failed" };

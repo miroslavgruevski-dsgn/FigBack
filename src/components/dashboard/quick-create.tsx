@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { parseResponseJson } from "@/lib/parse-json-response";
 import { toast } from "sonner";
 
 export function QuickCreate() {
@@ -29,8 +30,8 @@ export function QuickCreate() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to create");
+        const err = await parseResponseJson<{ error?: string }>(res);
+        throw new Error(err?.error ?? "Failed to create");
       }
 
       toast.success("Project created!");

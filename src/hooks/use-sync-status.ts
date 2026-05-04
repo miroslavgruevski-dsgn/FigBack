@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { parseResponseJson } from "@/lib/parse-json-response";
 
 interface JobStatus {
   id: string;
@@ -22,7 +23,8 @@ export function useSyncStatus(jobId: string | null) {
       try {
         const res = await fetch(`/api/jobs/run`, { method: "POST" });
         if (cancelled) return;
-        const data = await res.json();
+        const data = await parseResponseJson<JobStatus>(res);
+        if (!data) return;
         setStatus(data);
         if (data.status === "done" || data.status === "failed") {
           setDone(true);
