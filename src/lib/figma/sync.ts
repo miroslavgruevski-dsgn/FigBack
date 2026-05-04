@@ -1,5 +1,10 @@
 import { prisma } from "@/lib/db";
-import { getFileComments, getFile, getFileNodes } from "./client";
+import {
+  getCommentReactions,
+  getFileComments,
+  getFile,
+  getFileNodes,
+} from "./client";
 import {
   applyIncludedSelectionFallback,
   buildNodeIdToNameMap,
@@ -8,7 +13,25 @@ import {
   type MappedComment,
 } from "./map-comments";
 import { getFigmaToken } from "./token";
-import type { FigmaComment, SyncMode } from "@/types/figma";
+import type { FigmaComment, FigmaReaction, SyncMode } from "@/types/figma";
+
+function groupReactionsForStore(
+  reactions: FigmaReaction[]
+): { emoji: string; count: number; users: string[] }[] {
+  const map = new Map<string, { count: number; users: string[] }>();
+  for (const r of reactions) {
+    const cur = map.get(r.emoji) ?? { count: 0, users: [] };
+    cur.count += 1;
+    const handle = r.user?.handle ?? "?";
+    if (!cur.users.includes(handle)) cur.users.push(handle);
+    map.set(r.emoji, cur);
+  }
+  return [...map.entries()].map(([emoji, v]) => ({
+    emoji,
+    count: v.count,
+    users: v.users,
+  }));
+}
 
 export function buildFigmaDeepLink(fileKey: string, nodeId: string | null): string | null {
   if (!nodeId) return null;
@@ -129,7 +152,7 @@ async function syncFile(
   fileKey: string,
   token: string,
   mode: SyncMode
-) {
+): Promise<void> {
   const dbFile = await prisma.figmaFile.findUniqueOrThrow({
     where: { id: fileId },
     select: { includedPages: true, includedFrames: true },
@@ -230,5 +253,24 @@ async function syncFile(
   const BATCH = 200;
   for (let i = 0; i < upsertOps.length; i += BATCH) {
     await prisma.$transaction(upsertOps.slice(i, i + BATCH));
+  }
+
+  if (mode === "full") {
+    const roots = await prisma.comment.findMany({
+      where: { fileId, parentId: null },
+      select: { id: true },
+    });
+    for (const { id } of roots) {
+      try {
+        const res = await getCommentReactions(fileKey, id, token);
+        const grouped = groupReactionsForStore(res.reactions ?? []);
+        await prisma.comment.update({
+          where: { id },
+          data: { reactions: grouped },
+        });
+      } catch {
+        /* ignore per-comment reaction failures */
+      }
+    }
   }
 }

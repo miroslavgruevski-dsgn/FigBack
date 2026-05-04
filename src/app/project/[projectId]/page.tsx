@@ -8,6 +8,7 @@ import { ArchiveProjectButton } from "./archive-project-button";
 import { EditableTitle } from "./editable-title";
 import { FigmaTokenField } from "./figma-token-field";
 import { FileManager } from "./file-manager";
+import { DeleteAnalysisButton } from "./delete-analysis-button";
 import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/error-state";
 
@@ -184,30 +185,42 @@ export default async function ProjectPage({
             <div className="absolute left-[11px] top-4 bottom-4 w-px bg-border" />
             <div className="space-y-2">
               {project.rounds.map((round, idx) => (
-                <Link
+                <div
                   key={round.id}
-                  href={`/project/${projectId}/digest?roundId=${round.id}`}
-                  className="glass-tint rounded-lg p-4 pl-8 flex items-center justify-between hover-lift relative block"
+                  className="glass-tint rounded-lg p-4 pl-8 flex items-stretch gap-2 hover-lift relative"
                 >
-                  <div className={`absolute left-[7px] size-[10px] rounded-full border-2 border-primary ${idx === 0 ? "bg-primary" : "bg-background"}`} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{round.name ?? "Unnamed analysis"}</p>
-                    <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                      <MessageSquare className="size-3" />
-                      {round.commentCount} comments · {new Date(round.syncedAt).toLocaleDateString()}
-                    </p>
-                    {round.files && round.files.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {round.files.map((f) => (
-                          <Badge key={f.name} variant="secondary" className="text-[10px] px-1.5 py-0 gap-1">
-                            {f.name} ({f.commentCount})
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <Sparkles className="size-4 text-primary shrink-0 ml-3" />
-                </Link>
+                  <div
+                    className={`absolute left-[7px] top-1/2 -translate-y-1/2 size-[10px] rounded-full border-2 border-primary ${idx === 0 ? "bg-primary" : "bg-background"}`}
+                  />
+                  <Link
+                    href={`/project/${projectId}/digest?roundId=${round.id}`}
+                    className="min-w-0 flex-1 flex items-center justify-between gap-3 py-0.5 rounded-md outline-offset-2 focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{round.name ?? "Unnamed analysis"}</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                        <MessageSquare className="size-3 shrink-0" />
+                        {round.commentCount} comments · {new Date(round.syncedAt).toLocaleDateString()}
+                      </p>
+                      {round.files && round.files.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {round.files.map((f) => (
+                            <Badge key={f.name} variant="secondary" className="text-[10px] px-1.5 py-0 gap-1">
+                              {f.name} ({f.commentCount})
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <Sparkles className="size-4 text-primary shrink-0" aria-hidden />
+                  </Link>
+                  <DeleteAnalysisButton
+                    projectId={projectId}
+                    roundId={round.id}
+                    analysisLabel={round.name ?? "Analysis"}
+                    afterDelete="refresh"
+                  />
+                </div>
               ))}
             </div>
           </div>

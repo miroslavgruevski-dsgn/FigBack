@@ -4,8 +4,16 @@ import { SummaryCard } from "@/components/digest/summary-card";
 import { StatsBar } from "@/components/digest/stats-bar";
 import { IssueCard } from "@/components/digest/issue-card";
 import { DigestActions } from "./digest-actions";
+import { DeleteAnalysisButton } from "../delete-analysis-button";
 import { ErrorState } from "@/components/ui/error-state";
 import { Badge } from "@/components/ui/badge";
+import { commentThreadToReplies } from "@/lib/digest/comment-thread";
+import {
+  displayFrameSection,
+  frameGroupKey,
+  pageGroupKey,
+} from "@/lib/digest/display-labels";
+import type { Prisma } from "@prisma/client";
 import type { Priority, IssueStatus } from "@/types/digest";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +37,9 @@ interface DigestCluster {
   thumbnailUrl?: string;
   cards: {
     id: string;
+    fullFrameUrl: string | null;
     figmaDeepLink: string | null;
+    commentThread: Prisma.JsonValue | null;
     comment: {
       message: string;
       authorName: string;
@@ -37,13 +47,6 @@ interface DigestCluster {
       createdAt: Date;
       resolvedAt: Date | null;
       reactions?: { emoji: string; count: number; users: string[] }[];
-      replies?: {
-        message: string;
-        authorName: string;
-        authorImg: string;
-        createdAt: Date;
-        reactions?: { emoji: string; count: number; users: string[] }[];
-      }[];
     };
     assessment: {
       issueType: string;
@@ -80,7 +83,11 @@ export default async function DigestPage({
           clusters: {
             include: {
               cards: {
-                include: {
+                select: {
+                  id: true,
+                  fullFrameUrl: true,
+                  figmaDeepLink: true,
+                  commentThread: true,
                   comment: {
                     select: {
                       message: true,
@@ -108,39 +115,50 @@ export default async function DigestPage({
           executiveSummary: dbRound.executiveSummary ?? "",
           commentCount: dbRound.commentCount,
         };
-        clusters = dbRound.clusters.map((c) => ({
-          id: c.id,
-          title: c.title,
-          summary: c.summary,
-          frameName: c.frameName,
-          pageName: c.pageName,
-          status: c.status as IssueStatus,
-          effortEstimate: c.effortEstimate,
-          thumbnailUrl: c.cards.find((card) => card.fullFrameUrl)?.fullFrameUrl ?? undefined,
-          cards: c.cards.map((card) => ({
-            id: card.id,
-            figmaDeepLink: card.figmaDeepLink,
-            comment: {
-              message: card.comment.message,
-              authorName: card.comment.authorName,
-              authorImg: card.comment.authorImg ?? "",
-              createdAt: card.comment.createdAt,
-              resolvedAt: card.comment.resolvedAt,
-              reactions: (card.comment.reactions ?? []) as { emoji: string; count: number; users: string[] }[],
-            },
-            assessment: card.assessment
-              ? {
-                  issueType: card.assessment.issueType,
-                  priorityHint: card.assessment.priorityHint as Priority,
-                  elementTarget: card.assessment.elementTarget,
-                  actionability: card.assessment.actionability,
-                  suggestedAction: card.assessment.suggestedAction,
-                  needsClarify: card.assessment.needsClarify,
-                  ambiguityReason: card.assessment.ambiguityReason,
-                }
-              : null,
-          })),
-        }));
+        clusters = dbRound.clusters.map((c) => {
+          const cardsWithPreview = c.cards.filter((card) => card.fullFrameUrl);
+          const preferred =
+            cardsWithPreview.find((card) => card.assessment) ?? cardsWithPreview[0];
+          return {
+            id: c.id,
+            title: c.title,
+            summary: c.summary,
+            frameName: c.frameName,
+            pageName: c.pageName,
+            status: c.status as IssueStatus,
+            effortEstimate: c.effortEstimate,
+            thumbnailUrl: preferred?.fullFrameUrl ?? undefined,
+            cards: c.cards.map((card) => ({
+              id: card.id,
+              fullFrameUrl: card.fullFrameUrl,
+              figmaDeepLink: card.figmaDeepLink,
+              commentThread: card.commentThread,
+              comment: {
+                message: card.comment.message,
+                authorName: card.comment.authorName,
+                authorImg: card.comment.authorImg ?? "",
+                createdAt: card.comment.createdAt,
+                resolvedAt: card.comment.resolvedAt,
+                reactions: (card.comment.reactions ?? []) as {
+                  emoji: string;
+                  count: number;
+                  users: string[];
+                }[],
+              },
+              assessment: card.assessment
+                ? {
+                    issueType: card.assessment.issueType,
+                    priorityHint: card.assessment.priorityHint as Priority,
+                    elementTarget: card.assessment.elementTarget,
+                    actionability: card.assessment.actionability,
+                    suggestedAction: card.assessment.suggestedAction,
+                    needsClarify: card.assessment.needsClarify,
+                    ambiguityReason: card.assessment.ambiguityReason,
+                  }
+                : null,
+            })),
+          };
+        });
       }
     } catch {
       dbError = true;
@@ -216,12 +234,41 @@ export default async function DigestPage({
 
       <div className="mt-6 flex items-center justify-between gap-4">
         <div>
-          <h1 className="font-heading text-2xl font-semibold">{round.name}</h1>
+          <h1 className="font-heading text-2xl font-semibold">
+            {round.name && round.name !== "Digest"
+              ? round.name
+              : new Date(round.syncedAt).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {totalComments} comments across {clusters.length} issues
+            {round.commentCount} comments analyzed · {totalComments} in digest ·{" "}
+            {new Date(round.syncedAt).toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            })}
           </p>
         </div>
-        <DigestActions projectId={projectId} roundId={round.id} />
+        <div className="flex items-center gap-2 shrink-0">
+          <DeleteAnalysisButton
+            projectId={projectId}
+            roundId={round.id}
+            analysisLabel={
+              round.name !== "Digest"
+                ? round.name
+                : `Analysis · ${new Date(round.syncedAt).toLocaleDateString()}`
+            }
+            afterDelete="go-project"
+            size="icon"
+            variant="outline"
+          />
+          <DigestActions projectId={projectId} roundId={round.id} />
+        </div>
       </div>
 
       <div className="mt-6">
@@ -272,8 +319,8 @@ function SectionedClusters({ clusters }: { clusters: DigestCluster[] }) {
   const pages = new Map<string, Map<string, DigestCluster[]>>();
 
   for (const cluster of clusters) {
-    const page = cluster.pageName || "Uncategorized";
-    const frame = cluster.frameName || "General";
+    const page = pageGroupKey(cluster.pageName);
+    const frame = frameGroupKey(cluster.frameName);
     if (!pages.has(page)) pages.set(page, new Map());
     const frames = pages.get(page)!;
     if (!frames.has(frame)) frames.set(frame, []);
@@ -294,11 +341,13 @@ function SectionedClusters({ clusters }: { clusters: DigestCluster[] }) {
     <div className="space-y-8">
       {Array.from(pages.entries()).map(([pageName, frames]) => {
         const pageIssueCount = Array.from(frames.values()).reduce((s, arr) => s + arr.length, 0);
+        const pageHeading =
+          pageName === "__page_unknown__" ? "Unnamed page" : pageName;
         return (
           <section key={pageName}>
             <div className="flex items-center gap-2 mb-4">
               <ChevronRight className="size-4 text-primary" />
-              <h2 className="font-heading text-lg font-semibold">{pageName}</h2>
+              <h2 className="font-heading text-lg font-semibold">{pageHeading}</h2>
               <Badge variant="secondary" className="text-xs ml-1">
                 {pageIssueCount} issue{pageIssueCount !== 1 ? "s" : ""}
               </Badge>
@@ -308,7 +357,9 @@ function SectionedClusters({ clusters }: { clusters: DigestCluster[] }) {
                 <div key={frameName}>
                   {frames.size > 1 && (
                     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 ml-1">
-                      {frameName}
+                      {displayFrameSection(
+                        frameName === "__frame_unknown__" ? "" : frameName
+                      )}
                     </p>
                   )}
                   <div className="space-y-3">
@@ -339,13 +390,7 @@ function SectionedClusters({ clusters }: { clusters: DigestCluster[] }) {
                             message: card.comment.message,
                             createdAt: card.comment.createdAt.toISOString(),
                             reactions: card.comment.reactions,
-                            replies: card.comment.replies?.map((r) => ({
-                              authorName: r.authorName,
-                              authorImg: r.authorImg,
-                              message: r.message,
-                              createdAt: new Date(r.createdAt).toISOString(),
-                              reactions: r.reactions,
-                            })),
+                            replies: commentThreadToReplies(card.commentThread),
                           }))}
                         />
                       );

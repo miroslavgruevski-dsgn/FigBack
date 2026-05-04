@@ -13,9 +13,12 @@ import {
   X,
   ChevronRight,
   ChevronDown,
+  RefreshCw,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface FigmaFileData {
   id: string;
@@ -43,6 +46,7 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [configureFileId, setConfigureFileId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   async function handleAdd() {
     if (!newUrl.trim()) return;
@@ -90,22 +94,67 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
     }
   }
 
+  async function handleSyncProject() {
+    if (files.length === 0) return;
+    setSyncing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setError(data.error ?? "Sync failed");
+        return;
+      }
+      toast.success("Sync started", {
+        description: "All linked Figma files in this project are queued to update.",
+      });
+      router.refresh();
+    } catch {
+      setError("Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <section className="mt-8">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
         <h2 className="font-heading text-base font-semibold">Figma Files</h2>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1 text-xs"
-          onClick={() => {
-            setShowAddInput(!showAddInput);
-            setError(null);
-          }}
-        >
-          <Plus className="size-3.5" />
-          Add file
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs rounded-lg"
+            type="button"
+            disabled={syncing || files.length === 0}
+            title="Syncs every linked Figma file in this project (comments and metadata)."
+            onClick={handleSyncProject}
+          >
+            {syncing ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="size-3.5" />
+            )}
+            Sync project
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1 text-xs"
+            type="button"
+            onClick={() => {
+              setShowAddInput(!showAddInput);
+              setError(null);
+            }}
+          >
+            <Plus className="size-3.5" />
+            Add file
+          </Button>
+        </div>
       </div>
 
       <div className="glass rounded-lg p-3">
@@ -152,85 +201,118 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
             No Figma files linked yet. Add one above.
           </p>
         ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div
+            className={cn(
+              "grid gap-3",
+              files.length > 1 ? "sm:grid-cols-2" : "grid-cols-1"
+            )}
+          >
             {files.map((file) => {
               const hasError = !!file.lastError;
               const isDeleting = deletingId === file.id;
               return (
                 <div key={file.id}>
-                  <div className="flex items-center gap-3 rounded-md px-3 py-2.5 hover:bg-glass-hover transition-colors group">
-                    <span
-                      className={`size-2 rounded-full shrink-0 ${hasError ? "bg-destructive" : "bg-figma-accent"}`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium truncate">{file.name}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {file._count.comments} comments
-                        {file.lastSyncedAt &&
-                          ` · Synced ${new Date(file.lastSyncedAt).toLocaleDateString()}`}
-                      </p>
-                      {hasError && (
-                        <p className="text-[11px] text-destructive mt-0.5 flex items-center gap-1">
-                          <AlertTriangle className="size-3 shrink-0" />
-                          <span className="truncate">{file.lastError}</span>
-                          {hasTokenError && (
-                            <a
-                              href="#figma-token-section"
-                              className="underline underline-offset-2 shrink-0 ml-1"
-                            >
-                              Update token
-                            </a>
-                          )}
+                  <div className="rounded-xl border border-border/50 bg-background/40 p-3 sm:p-4 flex flex-col gap-3">
+                    <div className="flex items-start gap-3">
+                      <span
+                        className={`size-2 rounded-full shrink-0 mt-1.5 ${hasError ? "bg-destructive" : "bg-figma-accent"}`}
+                      />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-snug">{file.name}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {file._count.comments} comments
+                          {file.lastSyncedAt &&
+                            ` · Synced ${new Date(file.lastSyncedAt).toLocaleDateString()}`}
                         </p>
-                      )}
-                      {((file.includedPages && file.includedPages.length > 0) ||
-                        (file.includedFrames && file.includedFrames.length > 0)) && (
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          {[
-                            file.includedPages?.length
-                              ? `${file.includedPages.length} page${file.includedPages.length !== 1 ? "s" : ""}`
-                              : null,
-                            file.includedFrames?.length
-                              ? `${file.includedFrames.length} frame${file.includedFrames.length !== 1 ? "s" : ""}`
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join(", ")}{" "}
-                          selected
-                        </p>
-                      )}
+                        {hasError && (
+                          <p className="text-[11px] text-destructive flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                            <AlertTriangle className="size-3 shrink-0" />
+                            <span className="break-words">{file.lastError}</span>
+                            {hasTokenError && (
+                              <a
+                                href="#figma-token-section"
+                                className="underline underline-offset-2 shrink-0"
+                              >
+                                Update token
+                              </a>
+                            )}
+                          </p>
+                        )}
+                        {((file.includedPages && file.includedPages.length > 0) ||
+                          (file.includedFrames && file.includedFrames.length > 0)) && (
+                          <p className="text-[11px] text-muted-foreground">
+                            {[
+                              file.includedPages?.length
+                                ? `${file.includedPages.length} page${file.includedPages.length !== 1 ? "s" : ""}`
+                                : null,
+                              file.includedFrames?.length
+                                ? `${file.includedFrames.length} frame${file.includedFrames.length !== 1 ? "s" : ""}`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(", ")}{" "}
+                            selected
+                          </p>
+                        )}
+                      </div>
+                      <a
+                        href={file.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={cn(
+                          buttonVariants({ variant: "outline", size: "sm" }),
+                          "h-8 gap-1 text-xs rounded-lg shrink-0 inline-flex"
+                        )}
+                      >
+                        <ExternalLink className="size-3.5" />
+                        Open
+                      </a>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
+
+                    <div className="flex flex-wrap gap-2 pt-2 border-t border-border/40">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 text-xs rounded-lg"
                         onClick={() =>
                           setConfigureFileId(configureFileId === file.id ? null : file.id)
                         }
-                        className="text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 p-1"
-                        aria-label={`Configure pages for ${file.name}`}
                       >
                         <Settings2 className="size-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(file.id)}
+                        Scope
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 text-xs rounded-lg"
+                        disabled={syncing}
+                        title="Syncs every linked file in this project"
+                        onClick={handleSyncProject}
+                      >
+                        {syncing ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="size-3.5" />
+                        )}
+                        Sync project
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 text-xs rounded-lg text-destructive border-destructive/30 hover:bg-destructive/10"
                         disabled={isDeleting}
-                        className="text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100 p-1"
-                        aria-label={`Remove ${file.name}`}
+                        onClick={() => handleDelete(file.id)}
                       >
                         {isDeleting ? (
                           <Loader2 className="size-3.5 animate-spin" />
                         ) : (
                           <Trash2 className="size-3.5" />
                         )}
-                      </button>
-                      <a
-                        href={file.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-muted-foreground hover:text-foreground transition-colors p-1"
-                        aria-label={`Open ${file.name} in Figma`}
-                      >
-                        <ExternalLink className="size-3.5" />
-                      </a>
+                        Remove
+                      </Button>
                     </div>
                   </div>
 

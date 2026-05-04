@@ -5,6 +5,7 @@ import { verifyShareToken } from "@/lib/integrations/share-link";
 import { prisma } from "@/lib/db";
 import { StatsBar } from "@/components/digest/stats-bar";
 import { IssueCard } from "@/components/digest/issue-card";
+import { commentThreadToReplies } from "@/lib/digest/comment-thread";
 import type { Priority, IssueStatus } from "@/types/digest";
 
 export const metadata: Metadata = {
@@ -32,7 +33,9 @@ export default async function SharePage({
           cards: {
             select: {
               id: true,
+              fullFrameUrl: true,
               figmaDeepLink: true,
+              commentThread: true,
               comment: {
                 select: {
                   message: true,
@@ -51,7 +54,17 @@ export default async function SharePage({
     },
   });
 
-  if (!round) notFound();
+  if (!round) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-16 sm:px-6 text-center">
+        <MessageSquare className="size-10 mx-auto text-muted-foreground opacity-60" />
+        <h1 className="mt-4 font-heading text-lg font-semibold">Analysis unavailable</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This shared analysis was removed or is no longer accessible.
+        </p>
+      </div>
+    );
+  }
 
   const totalComments = round.clusters.reduce((sum, c) => sum + c.cards.length, 0);
   const resolvedClusters = round.clusters.filter((c) => c.status === "done").length;
@@ -97,6 +110,11 @@ export default async function SharePage({
               return order.indexOf(ap) - order.indexOf(bp);
             })[0];
           const priority = topCard?.assessment?.priorityHint as Priority | undefined;
+          const withPreview = cluster.cards.filter((c) => c.fullFrameUrl);
+          const thumbnailUrl = (
+            withPreview.find((c) => c.assessment) ?? withPreview[0]
+          )?.fullFrameUrl;
+
           return (
             <IssueCard
               key={cluster.id}
@@ -109,12 +127,18 @@ export default async function SharePage({
               effortEstimate={cluster.effortEstimate}
               figmaDeepLink={cluster.cards.find((c) => c.figmaDeepLink)?.figmaDeepLink}
               suggestedAction={topCard?.assessment?.suggestedAction}
+              thumbnailUrl={thumbnailUrl}
               comments={cluster.cards.map((card) => ({
                 authorName: card.comment.authorName,
                 authorImg: card.comment.authorImg,
                 message: card.comment.message,
                 createdAt: card.comment.createdAt.toISOString(),
-                reactions: (card.comment.reactions ?? []) as { emoji: string; count: number; users: string[] }[],
+                reactions: (card.comment.reactions ?? []) as {
+                  emoji: string;
+                  count: number;
+                  users: string[];
+                }[],
+                replies: commentThreadToReplies(card.commentThread),
               }))}
             />
           );

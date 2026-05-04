@@ -17,7 +17,7 @@ export async function exportFrameImages(
     try {
       const response = await getFileImages(fileKey, batch, token);
       if (response.err) {
-        logger.error("Image export error", { fileKey, error: response.err });
+        logger.error("Figma images API error", { fileKey, error: response.err, batchSize: batch.length });
         continue;
       }
       for (const [nodeId, url] of Object.entries(response.images)) {
@@ -28,6 +28,32 @@ export async function exportFrameImages(
         fileKey,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  const stillMissing = unique.filter((id) => !result.has(id));
+  if (stillMissing.length > 0) {
+    for (let i = 0; i < stillMissing.length; i += batchSize) {
+      const batch = stillMissing.slice(i, i + batchSize);
+      try {
+        const response = await getFileImages(fileKey, batch, token, 1);
+        if (response.err) {
+          logger.error("Figma images retry (1x)", {
+            fileKey,
+            error: response.err,
+            batchSize: batch.length,
+          });
+          continue;
+        }
+        for (const [nodeId, url] of Object.entries(response.images)) {
+          if (url) result.set(nodeId, url);
+        }
+      } catch (err) {
+        logger.error("Image batch retry failed", {
+          fileKey,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 

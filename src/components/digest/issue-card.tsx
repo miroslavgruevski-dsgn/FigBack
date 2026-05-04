@@ -6,7 +6,12 @@ import { ExternalLink, ChevronDown, ChevronUp, Lightbulb, CheckCircle2, Circle, 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PriorityBadge } from "./priority-badge";
 import { StatusBadge } from "./status-badge";
+import { formatFramePageLine } from "@/lib/digest/display-labels";
 import type { Priority, IssueStatus } from "@/types/digest";
+
+function normalizedSummaryLine(s: string): string {
+  return s.trim().replace(/\s+/g, " ").toLowerCase();
+}
 
 interface ReactionData {
   emoji: string;
@@ -171,8 +176,7 @@ export function IssueCard({
           )}
         </div>
         <p className="text-xs text-muted-foreground truncate">
-          {frameName}
-          {pageName && <span> &middot; {pageName}</span>}
+          {formatFramePageLine(frameName, pageName)}
         </p>
       </div>
 
@@ -195,11 +199,11 @@ export function IssueCard({
           </button>
         ) : (
           <div
-            className="shrink-0 hidden sm:flex flex-col items-center justify-center w-28 aspect-[4/3] rounded-md border border-dashed border-border/60 bg-muted/30 text-muted-foreground"
+            className="shrink-0 hidden sm:flex flex-col items-center justify-center w-[4.5rem] aspect-[4/3] rounded-md border border-dashed border-border/50 bg-muted/20 text-muted-foreground"
             aria-hidden
           >
-            <ImageOff className="size-6 opacity-60" />
-            <span className="text-[10px] mt-1 px-1 text-center leading-tight">No preview</span>
+            <ImageOff className="size-5 opacity-50" />
+            <span className="text-[9px] mt-0.5 px-0.5 text-center leading-tight">No preview</span>
           </div>
         )}
         <div className="flex-1 min-w-0 space-y-2">
@@ -229,7 +233,8 @@ export function IssueCard({
         </div>
       </div>
 
-      {suggestedAction && (
+      {suggestedAction &&
+        normalizedSummaryLine(suggestedAction) !== normalizedSummaryLine(summary) && (
         <div className="glass-tint rounded-md px-3 py-2.5 flex gap-2">
           <Lightbulb className="size-4 text-primary shrink-0 mt-0.5" />
           <p className="text-sm text-foreground/90">{suggestedAction}</p>
