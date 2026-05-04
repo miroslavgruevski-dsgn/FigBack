@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
-import { ExternalLink, ChevronDown, ChevronUp, Lightbulb, CheckCircle2, Circle, Loader2 } from "lucide-react";
+import { ExternalLink, ChevronDown, ChevronUp, Lightbulb, CheckCircle2, Circle, Loader2, ImageOff } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PriorityBadge } from "./priority-badge";
 import { StatusBadge } from "./status-badge";
@@ -177,7 +177,7 @@ export function IssueCard({
       </div>
 
       <div className="flex gap-4">
-        {thumbnailUrl && (
+        {thumbnailUrl ? (
           <button
             ref={triggerRef}
             type="button"
@@ -193,9 +193,17 @@ export function IssueCard({
               className="rounded-md object-cover border border-border/50 hover:opacity-80 transition-opacity"
             />
           </button>
+        ) : (
+          <div
+            className="shrink-0 hidden sm:flex flex-col items-center justify-center w-28 aspect-[4/3] rounded-md border border-dashed border-border/60 bg-muted/30 text-muted-foreground"
+            aria-hidden
+          >
+            <ImageOff className="size-6 opacity-60" />
+            <span className="text-[10px] mt-1 px-1 text-center leading-tight">No preview</span>
+          </div>
         )}
         <div className="flex-1 min-w-0 space-y-2">
-          {thumbnailUrl && (
+          {thumbnailUrl ? (
             <button
               type="button"
               onClick={() => setLightboxOpen(true)}
@@ -210,6 +218,11 @@ export function IssueCard({
                 className="rounded-md object-cover border border-border/50"
               />
             </button>
+          ) : (
+            <div className="sm:hidden flex items-center gap-2 mb-2 py-2 px-3 rounded-md border border-dashed border-border/60 bg-muted/20 text-muted-foreground text-xs">
+              <ImageOff className="size-4 shrink-0 opacity-70" />
+              <span>No frame preview (pin node may be missing in the file)</span>
+            </div>
           )}
           <h3 className="font-heading text-base font-semibold leading-snug">{title}</h3>
           <p className="text-sm text-muted-foreground leading-relaxed">{summary}</p>

@@ -167,7 +167,7 @@ export default function SettingsPage() {
 
         <SettingsCard
           title="LLM Provider"
-          description="Choose your AI provider for comment classification."
+          description="Choose your LLM provider for comment classification."
           status={llmConnected ? "connected" : "not-configured"}
         >
           <div className={cn("grid gap-3 sm:grid-cols-3 transition-opacity", config.skipLlm && "opacity-40 pointer-events-none")}>

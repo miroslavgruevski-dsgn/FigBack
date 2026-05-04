@@ -50,7 +50,14 @@ AGENTS.md
 CLAUDE.md
 *.plan.md
 *_AUDIT.md
+CHANGELOG.AI.md
 starting-prompt.md
 read.md
 .vercel
 .env*.local
+
+# cache / local tooling
+.eslintcache
+.turbo
+coverage/
+*.pem

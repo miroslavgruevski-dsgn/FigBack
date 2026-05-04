@@ -1,6 +1,6 @@
 import type { FigmaComment, FigmaNode } from "@/types/figma";
 
-interface MappedComment {
+export interface MappedComment {
   nodeId: string | null;
   frameId: string | null;
   pageId: string | null;
@@ -36,26 +36,42 @@ export function mapComment(
   }
 
   const page = path.find((n) => n.type === "CANVAS") ?? null;
-  const frame =
-    path.find(
-      (n) =>
-        n.type === "FRAME" ||
-        n.type === "COMPONENT" ||
-        n.type === "COMPONENT_SET"
-    ) ?? null;
+  const container = pickDisplayContainer(path);
 
   return {
     nodeId,
-    frameId: frame?.id ?? null,
+    frameId: container?.id ?? null,
     pageId: page?.id ?? null,
-    frameName: frame?.name ?? null,
+    frameName: container?.name ?? null,
     pageName: page?.name ?? null,
     pinX,
     pinY,
     regionW: null,
     regionH: null,
-    mapConfidence: 1,
+    mapConfidence: container ? 1 : page ? 0.6 : 0.4,
   };
+}
+
+export const DISPLAY_CONTAINER_TYPES = new Set([
+  "FRAME",
+  "COMPONENT",
+  "COMPONENT_SET",
+  "SECTION",
+]);
+
+function pickDisplayContainer(path: FigmaNode[]): { id: string; name: string } | null {
+  let primary: FigmaNode | null = null;
+  let groupFallback: FigmaNode | null = null;
+  for (const n of path) {
+    if (DISPLAY_CONTAINER_TYPES.has(n.type)) {
+      primary = n;
+    }
+    if (n.type === "GROUP") {
+      groupFallback = n;
+    }
+  }
+  const chosen = primary ?? groupFallback;
+  return chosen ? { id: chosen.id, name: chosen.name } : null;
 }
 
 function empty(): MappedComment {
@@ -87,4 +103,61 @@ function findNodePath(
     if (result) return result;
   }
   return null;
+}
+
+export function buildNodeIdToNameMap(tree: FigmaNode): Map<string, string> {
+  const m = new Map<string, string>();
+  function walk(n: FigmaNode) {
+    m.set(n.id, n.name);
+    if (n.children) {
+      for (const c of n.children) walk(c);
+    }
+  }
+  walk(tree);
+  return m;
+}
+
+export function applyIncludedSelectionFallback(
+  mapped: MappedComment,
+  includedPages: string[],
+  includedFrames: string[],
+  idToName: Map<string, string>
+): MappedComment {
+  const out = { ...mapped };
+  if (!out.pageName && includedPages.length === 1) {
+    const id = includedPages[0];
+    out.pageId = out.pageId ?? id;
+    out.pageName = idToName.get(id) ?? out.pageName;
+  }
+  if (!out.frameName && includedFrames.length === 1) {
+    const id = includedFrames[0];
+    out.frameId = out.frameId ?? id;
+    out.frameName = idToName.get(id) ?? out.frameName;
+  }
+  if (out.pageId && !out.pageName && idToName.has(out.pageId)) {
+    out.pageName = idToName.get(out.pageId) ?? out.pageName;
+  }
+  if (out.frameId && !out.frameName && idToName.has(out.frameId)) {
+    out.frameName = idToName.get(out.frameId) ?? out.frameName;
+  }
+  return out;
+}
+
+type NodesDocMap = Record<string, { document: FigmaNode } | null | undefined>;
+
+export function enrichMappedFromNodeDocuments(
+  mapped: MappedComment,
+  nodes: NodesDocMap
+): MappedComment {
+  const nid = mapped.nodeId;
+  if (!nid) return mapped;
+  const doc = nodes[nid]?.document ?? null;
+  if (!doc) return mapped;
+  const out = { ...mapped };
+  if (!out.frameName && DISPLAY_CONTAINER_TYPES.has(doc.type)) {
+    out.frameId = doc.id;
+    out.frameName = doc.name;
+    out.mapConfidence = Math.max(out.mapConfidence, 0.85);
+  }
+  return out;
 }

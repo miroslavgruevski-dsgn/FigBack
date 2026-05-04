@@ -7,6 +7,7 @@ interface CardForClustering {
   comment: {
     frameId: string | null;
     nodeId: string | null;
+    pageId: string | null;
   };
   assessment: {
     issueType: string;
@@ -20,7 +21,7 @@ export async function clusterCards(roundId: string) {
   const cards = await prisma.reviewCard.findMany({
     where: { roundId },
     include: {
-      comment: { select: { frameId: true, nodeId: true } },
+      comment: { select: { frameId: true, nodeId: true, pageId: true } },
       assessment: {
         select: { issueType: true, elementTarget: true, priorityHint: true, suggestedAction: true },
       },
@@ -49,9 +50,12 @@ export async function clusterCards(roundId: string) {
           roundId,
           title: buildClusterTitle(representative, group.length),
           summary: buildClusterSummary(group),
-          frameId: representative.comment.frameId ?? "unknown",
+          frameId:
+            representative.comment.frameId ??
+            representative.comment.nodeId ??
+            "unknown",
           frameName: representative.frameName,
-          pageId: representative.pageName,
+          pageId: representative.comment.pageId ?? "unknown",
           pageName: representative.pageName,
           status: "open",
           effortEstimate: estimateEffort(group.length, issueType),
@@ -69,11 +73,14 @@ export async function clusterCards(roundId: string) {
 }
 
 function buildClusterKey(card: CardForClustering): string {
-  const frameId = card.comment.frameId ?? "no-frame";
+  const place =
+    card.comment.frameId ??
+    card.comment.nodeId ??
+    card.id;
   const issueType = card.assessment?.issueType ?? "other";
   const target = card.assessment?.elementTarget?.toLowerCase().trim() ?? "";
 
-  return `${frameId}::${issueType}::${target}`;
+  return `${place}::${issueType}::${target}`;
 }
 
 function buildClusterTitle(card: CardForClustering, count: number): string {

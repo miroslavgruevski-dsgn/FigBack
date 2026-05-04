@@ -35,7 +35,7 @@ export function DeleteProjectButton({
     return (
       <div className="glass rounded-lg p-4 flex items-center justify-between gap-4">
         <p className="text-sm text-destructive">
-          Delete <strong>{projectName}</strong> and all its data? This can't be undone.
+          Delete <strong>{projectName}</strong> and all its data? This cannot be undone.
         </p>
         <div className="flex gap-2 shrink-0">
           <Button

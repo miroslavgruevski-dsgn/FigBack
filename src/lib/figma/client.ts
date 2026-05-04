@@ -1,7 +1,9 @@
 import type {
   FigmaCommentsResponse,
+  FigmaFileNodesResponse,
   FigmaFileResponse,
   FigmaImageResponse,
+  FigmaNode,
   FigmaReactionsResponse,
 } from "@/types/figma";
 import { FigmaApiError } from "@/lib/errors";
@@ -61,14 +63,48 @@ export async function getFileComments(
   );
 }
 
+export function getFileTreeDepth(): number {
+  const raw = process.env.FIGMA_FILE_TREE_DEPTH;
+  if (raw === undefined || raw === "") return 8;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1) return 8;
+  return Math.min(n, 50);
+}
+
 export async function getFile(
   fileKey: string,
   token: string
 ): Promise<FigmaFileResponse> {
+  const depth = getFileTreeDepth();
   return figmaFetch<FigmaFileResponse>(
-    `/files/${fileKey}?depth=4`,
+    `/files/${fileKey}?depth=${depth}`,
     token
   );
+}
+
+const FILE_NODES_BATCH = 50;
+
+export async function getFileNodes(
+  fileKey: string,
+  nodeIds: string[],
+  token: string
+): Promise<Record<string, { document: FigmaNode } | undefined>> {
+  if (nodeIds.length === 0) return {};
+  const out: Record<string, { document: FigmaNode } | undefined> = {};
+  for (let i = 0; i < nodeIds.length; i += FILE_NODES_BATCH) {
+    const batch = nodeIds.slice(i, i + FILE_NODES_BATCH);
+    const qs = batch.map((id) => encodeURIComponent(id)).join(",");
+    const data = await figmaFetch<FigmaFileNodesResponse>(
+      `/files/${fileKey}/nodes?ids=${qs}&depth=2`,
+      token
+    );
+    for (const [key, entry] of Object.entries(data.nodes ?? {})) {
+      if (entry?.document) {
+        out[key] = { document: entry.document };
+      }
+    }
+  }
+  return out;
 }
 
 export async function getFileImages(

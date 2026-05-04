@@ -1,8 +1,14 @@
 import { prisma } from "@/lib/db";
-import { getFileComments, getFile } from "./client";
-import { mapComment } from "./map-comments";
+import { getFileComments, getFile, getFileNodes } from "./client";
+import {
+  applyIncludedSelectionFallback,
+  buildNodeIdToNameMap,
+  enrichMappedFromNodeDocuments,
+  mapComment,
+  type MappedComment,
+} from "./map-comments";
 import { getFigmaToken } from "./token";
-import type { SyncMode } from "@/types/figma";
+import type { FigmaComment, SyncMode } from "@/types/figma";
 
 export function buildFigmaDeepLink(fileKey: string, nodeId: string | null): string | null {
   if (!nodeId) return null;
@@ -103,6 +109,21 @@ async function createReviewCards(projectId: string, roundId: string) {
   });
 }
 
+function watchModeMapped(fc: FigmaComment): MappedComment {
+  return {
+    nodeId: fc.client_meta?.node_id ?? null,
+    frameId: null,
+    pageId: null,
+    frameName: null,
+    pageName: null,
+    pinX: fc.client_meta?.node_offset?.x ?? fc.client_meta?.x ?? null,
+    pinY: fc.client_meta?.node_offset?.y ?? fc.client_meta?.y ?? null,
+    regionW: null,
+    regionH: null,
+    mapConfidence: fc.client_meta?.node_id ? 0.5 : 0,
+  };
+}
+
 async function syncFile(
   fileId: string,
   fileKey: string,
@@ -113,8 +134,10 @@ async function syncFile(
     where: { id: fileId },
     select: { includedPages: true, includedFrames: true },
   });
-  const pageFilter = new Set(dbFile.includedPages);
-  const frameFilter = new Set(dbFile.includedFrames);
+  const includedPages = dbFile.includedPages ?? [];
+  const includedFrames = dbFile.includedFrames ?? [];
+  const pageFilter = new Set(includedPages);
+  const frameFilter = new Set(includedFrames);
   const hasPageFilter = pageFilter.size > 0;
   const hasFrameFilter = frameFilter.size > 0;
 
@@ -142,24 +165,35 @@ async function syncFile(
     });
   }
 
-  const upsertOps = [];
+  const nameMap = fileTree ? buildNodeIdToNameMap(fileTree) : new Map<string, string>();
+
+  const rows: { fc: FigmaComment; mapped: MappedComment }[] = [];
 
   for (const fc of figmaComments) {
-    const mapped = fileTree
-      ? mapComment(fc, fileTree)
-      : {
-          nodeId: fc.client_meta?.node_id ?? null,
-          frameId: null,
-          pageId: null,
-          frameName: null,
-          pageName: null,
-          pinX: fc.client_meta?.node_offset?.x ?? fc.client_meta?.x ?? null,
-          pinY: fc.client_meta?.node_offset?.y ?? fc.client_meta?.y ?? null,
-          regionW: null,
-          regionH: null,
-          mapConfidence: fc.client_meta?.node_id ? 0.5 : 0,
-        };
+    let mapped: MappedComment = fileTree ? mapComment(fc, fileTree) : watchModeMapped(fc);
+    mapped = applyIncludedSelectionFallback(mapped, includedPages, includedFrames, nameMap);
+    rows.push({ fc, mapped });
+  }
 
+  const needNodeIds = [
+    ...new Set(
+      rows
+        .filter((r) => r.mapped.nodeId && (!r.mapped.frameName || !r.mapped.pageName))
+        .map((r) => r.mapped.nodeId as string)
+    ),
+  ];
+
+  if (needNodeIds.length > 0) {
+    const nodes = await getFileNodes(fileKey, needNodeIds, token);
+    for (const row of rows) {
+      row.mapped = enrichMappedFromNodeDocuments(row.mapped, nodes);
+      row.mapped = applyIncludedSelectionFallback(row.mapped, includedPages, includedFrames, nameMap);
+    }
+  }
+
+  const upsertOps = [];
+
+  for (const { fc, mapped } of rows) {
     if (hasPageFilter && mapped.pageId && !pageFilter.has(mapped.pageId)) {
       continue;
     }

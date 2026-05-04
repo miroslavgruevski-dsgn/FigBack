@@ -26,7 +26,7 @@ const slides = [
     step: 2,
     icon: Sparkles,
     color: "from-[oklch(0.55_0.22_285)] to-[oklch(0.55_0.18_310)]",
-    title: "AI classifies every comment",
+    title: "Every comment is classified automatically",
     description:
       "Each new comment is analyzed by your chosen LLM (Gemini, GPT, or Claude). Comments get a priority, category, and effort tag.",
     detail: "Runs on every sync \u2022 No manual work",

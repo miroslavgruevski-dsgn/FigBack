@@ -108,7 +108,7 @@ function StepContent({
         <div className="space-y-4">
           <h2 className="font-heading text-lg font-semibold">Choose LLM Provider</h2>
           <p className="text-sm text-muted-foreground">
-            Select which AI provider to use for comment classification.
+            Select which LLM provider to use for comment classification.
           </p>
           <div className="grid gap-2">
             {["Google Gemini", "OpenAI GPT", "Anthropic Claude"].map((p) => (

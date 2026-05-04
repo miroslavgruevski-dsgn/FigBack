@@ -33,6 +33,13 @@ export interface FigmaFileResponse {
   document: FigmaNode;
 }
 
+export interface FigmaFileNodesResponse {
+  name: string;
+  lastModified: string;
+  version: string;
+  nodes: Record<string, { document: FigmaNode } | null>;
+}
+
 export interface FigmaNode {
   id: string;
   name: string;

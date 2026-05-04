@@ -23,11 +23,11 @@ export default function SignInPage({
           </h1>
 
           <p className="mt-3 text-base text-muted-foreground leading-relaxed">
-            Auto-watch your design files, classify comments with AI, and generate visual digests your team can act on.
+            Auto-watch your design files, classify comments automatically, and generate visual digests your team can act on.
           </p>
 
           <div className="mt-8 grid gap-3 sm:grid-cols-2">
-            <FeatureChip icon={Sparkles} label="AI classification" description="Gemini, GPT, or Claude" />
+            <FeatureChip icon={Sparkles} label="LLM classification" description="Gemini, GPT, or Claude" />
             <FeatureChip icon={BarChart3} label="Visual digests" description="Priority-sorted reports" />
             <FeatureChip icon={Bell} label="Real-time alerts" description="Slack + push notifications" />
             <FeatureChip icon={ShieldCheck} label="Team-only access" description="Restricted to @symphony.is" />

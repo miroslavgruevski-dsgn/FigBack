@@ -2,10 +2,10 @@
 
 Turn Figma comments into organized, prioritized design feedback.
 
-FigBack watches your Figma files for new comments, classifies them with AI, and generates visual digests your team can act on.
+FigBack watches your Figma files for new comments, classifies them via your configured LLM, and generates visual digests your team can act on.
 
 - **Auto-sync** comments from any Figma file
-- **AI classification** with Gemini, GPT, or Claude (priority, category, effort)
+- **LLM classification** with Gemini, GPT, or Claude (priority, category, effort)
 - **Visual digests** with executive summaries and action items
 - **Integrations** with Slack, Confluence, and push notifications
 
@@ -62,9 +62,9 @@ This lets your team sign in with their Google accounts.
 4. Give it a name (e.g. "FigBack") and make sure it has **File content** and **File comments** read access
 5. Copy the token. You'll need this in Step 7.
 
-### Step 6: Get an AI key
+### Step 6: Get an LLM API key
 
-FigBack uses AI to classify comments. The easiest option is Google's Gemini (free tier available):
+FigBack uses a language model to classify comments. The easiest option is Google's Gemini (free tier available):
 
 1. Go to [Google AI Studio](https://aistudio.google.com/apikey)
 2. Click **Create API Key**
