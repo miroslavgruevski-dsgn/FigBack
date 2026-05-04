@@ -13,7 +13,16 @@ import {
   type MappedComment,
 } from "./map-comments";
 import { getFigmaToken } from "./token";
+import { logger } from "@/lib/logger";
 import type { FigmaComment, FigmaReaction, SyncMode } from "@/types/figma";
+
+function reactionsSyncCap(): number {
+  const raw = process.env.FIGMA_REACTIONS_SYNC_CAP;
+  if (raw === undefined || raw === "") return 80;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return 80;
+  return Math.min(n, 500);
+}
 
 function groupReactionsForStore(
   reactions: FigmaReaction[]
@@ -256,11 +265,20 @@ async function syncFile(
   }
 
   if (mode === "full") {
+    const cap = reactionsSyncCap();
     const roots = await prisma.comment.findMany({
       where: { fileId, parentId: null },
       select: { id: true },
     });
-    for (const { id } of roots) {
+    const toFetch = cap === 0 ? [] : roots.slice(0, cap);
+    if (roots.length > toFetch.length) {
+      logger.warn("Reactions fetch capped for job time budget", {
+        fileId,
+        total: roots.length,
+        cap,
+      });
+    }
+    for (const { id } of toFetch) {
       try {
         const res = await getCommentReactions(fileKey, id, token);
         const grouped = groupReactionsForStore(res.reactions ?? []);

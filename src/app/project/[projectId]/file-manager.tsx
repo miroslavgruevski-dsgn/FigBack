@@ -18,6 +18,7 @@ import {
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { runJobQueueUntilIdle } from "@/lib/jobs/poll-client";
 import { toast } from "sonner";
 
 interface FigmaFileData {
@@ -47,6 +48,7 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
   const [error, setError] = useState<string | null>(null);
   const [configureFileId, setConfigureFileId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [syncStage, setSyncStage] = useState<string | null>(null);
 
   async function handleAdd() {
     if (!newUrl.trim()) return;
@@ -97,6 +99,7 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
   async function handleSyncProject() {
     if (files.length === 0) return;
     setSyncing(true);
+    setSyncStage("Starting...");
     setError(null);
     try {
       const res = await fetch("/api/sync", {
@@ -109,13 +112,23 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
         setError(data.error ?? "Sync failed");
         return;
       }
-      toast.success("Sync started", {
-        description: "All linked Figma files in this project are queued to update.",
+      toast.message("Sync queued", {
+        description: "Updating comments from Figma. This may take a minute.",
       });
+      const pollResult = await runJobQueueUntilIdle({
+        onProgress: (label) => setSyncStage(label),
+      });
+      if (!pollResult.ok) {
+        toast.error(pollResult.error ?? "Sync failed");
+        return;
+      }
+      toast.success("Sync complete");
       router.refresh();
     } catch {
       setError("Sync failed");
+      toast.error("Sync failed");
     } finally {
+      setSyncStage(null);
       setSyncing(false);
     }
   }
@@ -139,7 +152,7 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
             ) : (
               <RefreshCw className="size-3.5" />
             )}
-            Sync project
+            {syncing ? syncStage ?? "Syncing..." : "Sync project"}
           </Button>
           <Button
             variant="ghost"
@@ -296,7 +309,7 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
                         ) : (
                           <RefreshCw className="size-3.5" />
                         )}
-                        Sync project
+                        {syncing ? syncStage ?? "Syncing..." : "Sync project"}
                       </Button>
                       <Button
                         type="button"

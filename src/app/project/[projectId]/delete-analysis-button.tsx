@@ -76,18 +76,28 @@ export function DeleteAnalysisButton({
           </Button>
         }
       />
-      <DialogContent showCloseButton className="sm:max-w-md">
+      <DialogContent
+        showCloseButton
+        className="glass border-border/50 bg-background/85 sm:max-w-md"
+      >
         <DialogHeader>
-          <DialogTitle>Delete this analysis?</DialogTitle>
-          <DialogDescription>
-            <span className="font-medium text-foreground">{analysisLabel}</span> will be
-            permanently removed. Share links to this analysis will stop working.
-          </DialogDescription>
+          <div className="flex items-start gap-3">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted/80 text-muted-foreground">
+              <Trash2 className="size-4" aria-hidden />
+            </span>
+            <div className="min-w-0 space-y-2 pt-0.5">
+              <DialogTitle>Delete this analysis?</DialogTitle>
+              <DialogDescription>
+                <span className="font-medium text-foreground">{analysisLabel}</span> will be
+                permanently removed. Share links to this analysis will stop working.
+              </DialogDescription>
+            </div>
+          </div>
         </DialogHeader>
-        <DialogFooter className="border-0 bg-transparent p-0 pt-2 sm:justify-end">
+        <DialogFooter className="border-border/40 bg-muted/30">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="sm"
             className="rounded-lg"
             onClick={() => setOpen(false)}
@@ -97,8 +107,9 @@ export function DeleteAnalysisButton({
           </Button>
           <Button
             type="button"
+            variant="destructive"
             size="sm"
-            className="rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            className="rounded-lg"
             onClick={handleDelete}
             disabled={deleting}
           >

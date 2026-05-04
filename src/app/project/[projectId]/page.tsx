@@ -173,6 +173,10 @@ export default async function ProjectPage({
 
       <section className="mt-8">
         <h2 className="font-heading text-base font-semibold mb-3">Analyses</h2>
+        <p className="text-xs text-muted-foreground mb-3">
+          Each row shows how many comments were included in that run. File cards above show total
+          comments synced from Figma.
+        </p>
         {project.rounds.length === 0 ? (
           <div className="glass rounded-lg p-8 text-center">
             <Clock className="size-6 mx-auto text-muted-foreground" />
@@ -200,7 +204,8 @@ export default async function ProjectPage({
                       <p className="text-sm font-medium">{round.name ?? "Unnamed analysis"}</p>
                       <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
                         <MessageSquare className="size-3 shrink-0" />
-                        {round.commentCount} comments · {new Date(round.syncedAt).toLocaleDateString()}
+                        {round.commentCount} in this analysis ·{" "}
+                        {new Date(round.syncedAt).toLocaleDateString()}
                       </p>
                       {round.files && round.files.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-1.5">
