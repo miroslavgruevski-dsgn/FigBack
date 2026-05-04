@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
 import { extractFileKey } from "@/lib/figma/client";
+
+const DUPLICATE_FILE_MSG =
+  "This Figma file is already linked to another project. Remove it from that project first, or open that project instead.";
+
+function isDuplicateFileKeyError(e: Prisma.PrismaClientKnownRequestError): boolean {
+  if (e.code !== "P2002") return false;
+  const target = e.meta?.target;
+  if (target === undefined || target === null) return true;
+  const fields = Array.isArray(target) ? target : [String(target)];
+  return fields.some((f) => String(f).includes("fileKey"));
+}
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
@@ -67,6 +79,19 @@ export async function POST(req: NextRequest) {
     if (msg.startsWith("Invalid Figma URL:")) {
       return NextResponse.json({ error: msg }, { status: 400 });
     }
+
+    if (e instanceof Prisma.PrismaClientKnownRequestError) {
+      if (isDuplicateFileKeyError(e)) {
+        return NextResponse.json({ error: DUPLICATE_FILE_MSG }, { status: 409 });
+      }
+      if (e.code === "P2003") {
+        return NextResponse.json(
+          { error: "Invalid reference. Refresh and try again." },
+          { status: 400 }
+        );
+      }
+    }
+
     console.error(e);
     return NextResponse.json(
       { error: "Could not create project. Try again." },
