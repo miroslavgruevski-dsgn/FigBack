@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
 import { getNextPendingJob, claimJob, completeJob, failJob } from "@/lib/jobs";
 
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  const origin = req.headers.get("origin");
-  const host = req.headers.get("host");
-  if (origin && host && !origin.includes(host)) {
+  if (!isCsrfOriginAllowed(req)) {
     return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
   }
 

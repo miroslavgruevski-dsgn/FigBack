@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createJobChain, hasActiveJob } from "@/lib/jobs";
+import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 const syncSchema = z.object({
@@ -8,9 +9,7 @@ const syncSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const origin = req.headers.get("origin");
-  const host = req.headers.get("host");
-  if (origin && host && !origin.includes(host)) {
+  if (!isCsrfOriginAllowed(req)) {
     return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
   }
 

@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateText } from "ai";
+import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
 import { getProviderConfig, resolveModel } from "@/lib/llm/provider";
 
 export async function POST(req: NextRequest) {
-  const origin = req.headers.get("origin");
-  const host = req.headers.get("host");
-  if (origin && host && !origin.includes(host)) {
+  if (!isCsrfOriginAllowed(req)) {
     return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
   }
 

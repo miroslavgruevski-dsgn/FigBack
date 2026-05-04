@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
 
 const updateSchema = z.object({
@@ -41,9 +42,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const origin = req.headers.get("origin");
-  const host = req.headers.get("host");
-  if (origin && host && !origin.includes(host)) {
+  if (!isCsrfOriginAllowed(req)) {
     return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
   }
 
@@ -69,9 +68,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const origin = req.headers.get("origin");
-  const host = req.headers.get("host");
-  if (origin && host && !origin.includes(host)) {
+  if (!isCsrfOriginAllowed(req)) {
     return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
   }
 
