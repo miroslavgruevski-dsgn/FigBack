@@ -172,11 +172,14 @@ export default async function ProjectPage({
           <ArrowLeft className="size-4" />
           All projects
         </Link>
-        <div className="mt-8">
+        <div className="mt-8 space-y-6">
           <ErrorState
             title="Failed to load project"
             description="We couldn't connect to the database. Check your DATABASE_URL or try again later."
           />
+          <div className="flex justify-center">
+            <DeleteProjectButton projectId={projectId} afterDelete="home" />
+          </div>
         </div>
       </div>
     );

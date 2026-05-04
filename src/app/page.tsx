@@ -13,6 +13,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { QuickCreate } from "@/components/dashboard/quick-create";
+import { DeleteProjectButton } from "./project/[projectId]/delete-project-button";
 import { cn } from "@/lib/utils";
 
 import type { Metadata } from "next";
@@ -205,60 +206,71 @@ export default async function DashboardPage() {
               const comments = project.files.reduce((sum, f) => sum + f._count.comments, 0);
               const hasError = project.files.some((f) => f.lastError);
               return (
-                <Link
+                <div
                   key={project.id}
-                  href={`/project/${project.id}`}
-                  className="glass glass-hover rounded-lg p-5 hover-lift"
+                  className="glass glass-hover flex flex-col overflow-hidden rounded-lg"
                 >
-                  <div className="flex items-start gap-3">
-                    <div className={cn(
-                      "flex size-10 shrink-0 items-center justify-center rounded-lg",
-                      hasError ? "bg-destructive/10" : "bg-primary/10"
-                    )}>
-                      <FolderOpen className={cn("size-5", hasError ? "text-destructive" : "text-primary")} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <h2 className="font-heading text-base font-semibold truncate">{project.name}</h2>
-                        {hasError && (
-                          <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
-                        )}
+                  <Link
+                    href={`/project/${project.id}`}
+                    className="hover-lift block flex-1 p-5"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={cn(
+                        "flex size-10 shrink-0 items-center justify-center rounded-lg",
+                        hasError ? "bg-destructive/10" : "bg-primary/10"
+                      )}>
+                        <FolderOpen className={cn("size-5", hasError ? "text-destructive" : "text-primary")} />
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <Badge variant="secondary" className="text-[11px] gap-1 px-1.5 py-0">
-                          <FileText className="size-3" />
-                          {project.files.length}
-                        </Badge>
-                        <Badge variant="secondary" className="text-[11px] gap-1 px-1.5 py-0">
-                          <MessageSquare className="size-3" />
-                          {comments}
-                        </Badge>
-                        <Badge variant="secondary" className="text-[11px] gap-1 px-1.5 py-0">
-                          <Sparkles className="size-3" />
-                          {project._count.rounds}
-                        </Badge>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <h2 className="font-heading text-base font-semibold truncate">{project.name}</h2>
+                          {hasError && (
+                            <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <Badge variant="secondary" className="text-[11px] gap-1 px-1.5 py-0">
+                            <FileText className="size-3" />
+                            {project.files.length}
+                          </Badge>
+                          <Badge variant="secondary" className="text-[11px] gap-1 px-1.5 py-0">
+                            <MessageSquare className="size-3" />
+                            {comments}
+                          </Badge>
+                          <Badge variant="secondary" className="text-[11px] gap-1 px-1.5 py-0">
+                            <Sparkles className="size-3" />
+                            {project._count.rounds}
+                          </Badge>
+                        </div>
                       </div>
                     </div>
+                    {project.files[0]?.lastSyncedAt ? (
+                      (() => {
+                        const syncDate = new Date(project.files[0].lastSyncedAt!);
+                        const hoursAgo = (Date.now() - syncDate.getTime()) / (1000 * 60 * 60);
+                        const stale = hoursAgo > 24;
+                        return (
+                          <p className={cn("mt-3 text-xs", stale ? "text-amber-500" : "text-muted-foreground")}>
+                            {stale && <AlertTriangle className="inline size-3 mr-1 -mt-0.5" />}
+                            Synced {timeAgo(syncDate)}
+                          </p>
+                        );
+                      })()
+                    ) : (
+                      <p className="mt-3 text-xs text-amber-500">
+                        <AlertTriangle className="inline size-3 mr-1 -mt-0.5" />
+                        Never synced
+                      </p>
+                    )}
+                  </Link>
+                  <div className="flex justify-end border-t border-border/60 px-3 py-2">
+                    <DeleteProjectButton
+                      projectId={project.id}
+                      projectName={project.name}
+                      afterDelete="refresh"
+                    />
                   </div>
-                  {project.files[0]?.lastSyncedAt ? (
-                    (() => {
-                      const syncDate = new Date(project.files[0].lastSyncedAt!);
-                      const hoursAgo = (Date.now() - syncDate.getTime()) / (1000 * 60 * 60);
-                      const stale = hoursAgo > 24;
-                      return (
-                        <p className={cn("mt-3 text-xs", stale ? "text-amber-500" : "text-muted-foreground")}>
-                          {stale && <AlertTriangle className="inline size-3 mr-1 -mt-0.5" />}
-                          Synced {timeAgo(syncDate)}
-                        </p>
-                      );
-                    })()
-                  ) : (
-                    <p className="mt-3 text-xs text-amber-500">
-                      <AlertTriangle className="inline size-3 mr-1 -mt-0.5" />
-                      Never synced
-                    </p>
-                  )}
-                </Link>
+                </div>
               );
             })}
           </div>
@@ -346,23 +358,31 @@ export default async function DashboardPage() {
                 {archivedProjects.map((project) => {
                   const comments = project.files.reduce((sum, f) => sum + f._count.comments, 0);
                   return (
-                    <Link
+                    <div
                       key={project.id}
-                      href={`/project/${project.id}`}
-                      className="glass rounded-lg p-4 opacity-60 hover:opacity-100 transition-opacity"
+                      className="glass flex flex-col overflow-hidden rounded-lg opacity-60 transition-opacity hover:opacity-100"
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                          <Archive className="size-4 text-muted-foreground" />
+                      <Link href={`/project/${project.id}`} className="block p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+                            <Archive className="size-4 text-muted-foreground" />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="text-sm font-medium truncate">{project.name}</h3>
+                            <p className="text-xs text-muted-foreground">
+                              {project.files.length} files · {comments} comments
+                            </p>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <h3 className="text-sm font-medium truncate">{project.name}</h3>
-                          <p className="text-xs text-muted-foreground">
-                            {project.files.length} files · {comments} comments
-                          </p>
-                        </div>
+                      </Link>
+                      <div className="flex justify-end border-t border-border/60 px-3 py-2">
+                        <DeleteProjectButton
+                          projectId={project.id}
+                          projectName={project.name}
+                          afterDelete="refresh"
+                        />
                       </div>
-                    </Link>
+                    </div>
                   );
                 })}
               </div>
