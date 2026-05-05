@@ -19,6 +19,7 @@ import { PriorityBadge } from "./priority-badge";
 import { StatusBadge } from "./status-badge";
 import { formatFramePageLine } from "@/lib/digest/display-labels";
 import type { Priority, IssueStatus } from "@/types/digest";
+import { toast } from "sonner";
 
 function normalizedSummaryLine(s: string): string {
   return s.trim().replace(/\s+/g, " ").toLowerCase();
@@ -103,6 +104,7 @@ interface IssueCardProps {
   suggestedAction?: string | null;
   thumbnailUrl?: string | null;
   comments: CommentData[];
+  onStatusChange?: (clusterId: string, status: IssueStatus) => void;
 }
 
 const STATUS_CYCLE: IssueStatus[] = ["open", "in_progress", "done"];
@@ -124,6 +126,7 @@ export function IssueCard({
   suggestedAction,
   thumbnailUrl,
   comments,
+  onStatusChange,
 }: IssueCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -163,6 +166,8 @@ export function IssueCard({
     if (!clusterId || updating) return;
     const currentIdx = STATUS_CYCLE.indexOf(status);
     const nextStatus = STATUS_CYCLE[(currentIdx + 1) % STATUS_CYCLE.length];
+    const previousStatus = status;
+    setStatus(nextStatus);
     setUpdating(true);
     try {
       const res = await fetch(`/api/issues/${clusterId}`, {
@@ -170,8 +175,17 @@ export function IssueCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      if (res.ok) setStatus(nextStatus);
-    } catch { /* ignore */ }
+      if (!res.ok) {
+        setStatus(previousStatus);
+        toast.error("Failed to update status.");
+        setUpdating(false);
+        return;
+      }
+      onStatusChange?.(clusterId, nextStatus);
+    } catch {
+      setStatus(previousStatus);
+      toast.error("Failed to update status.");
+    }
     setUpdating(false);
   }
 

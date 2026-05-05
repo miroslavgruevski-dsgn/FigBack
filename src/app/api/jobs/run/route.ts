@@ -15,6 +15,7 @@ import { logger } from "@/lib/logger";
 import { buildFigmaDeepLink, syncProject } from "@/lib/figma/sync";
 import { FigmaApiError } from "@/lib/errors";
 import type { JobType } from "@/types/digest";
+import { recomputeRoundCommentCount } from "@/lib/digest/round-count";
 
 /** Full sync + classify + cluster can exceed 60s; Vercel caps at plan max (often 300s). */
 export const maxDuration = 300;
@@ -250,6 +251,7 @@ export async function POST(req: NextRequest) {
         });
 
         if (roots.length === 0) {
+          await recomputeRoundCommentCount(roundId);
           await ensurePostPrepareJobs(projectId, roundId);
           payload = await updateJobPayload(job.id, payload, {
             stage: "prepared",
@@ -484,6 +486,13 @@ export async function POST(req: NextRequest) {
 
         const { clusterCards } = await import("@/lib/digest/cluster");
         await clusterCards(roundId);
+        const countRepair = await recomputeRoundCommentCount(roundId);
+        if (countRepair.updated) {
+          logger.info("Round count repaired after clustering", {
+            roundId,
+            computedCount: countRepair.computedCount,
+          });
+        }
 
         const config2 = await prisma.teamConfig.findUnique({ where: { id: "default" } });
         if (!config2?.skipLlm) {

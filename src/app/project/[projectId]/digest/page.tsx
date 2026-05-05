@@ -1,20 +1,14 @@
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Filter, ChevronRight } from "lucide-react";
+import { ArrowLeft, BarChart3 } from "lucide-react";
 import { SummaryCard } from "@/components/digest/summary-card";
-import { StatsBar } from "@/components/digest/stats-bar";
-import { IssueCard } from "@/components/digest/issue-card";
 import { DigestActions } from "./digest-actions";
 import { DeleteAnalysisButton } from "../delete-analysis-button";
 import { ErrorState } from "@/components/ui/error-state";
-import { Badge } from "@/components/ui/badge";
-import { commentThreadToReplies } from "@/lib/digest/comment-thread";
-import {
-  displayFrameSection,
-  frameGroupKey,
-  pageGroupKey,
-} from "@/lib/digest/display-labels";
 import type { Prisma } from "@prisma/client";
 import type { Priority, IssueStatus } from "@/types/digest";
+import { DigestView, type DigestClusterView } from "./digest-view";
+import { recomputeRoundCommentCount } from "@/lib/digest/round-count";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +66,7 @@ export default async function DigestPage({
 
   let round: DigestRound | null = null;
   let clusters: DigestCluster[] = [];
+  let viewClusters: DigestClusterView[] = [];
   let dbError = false;
 
   if (roundId) {
@@ -108,12 +103,21 @@ export default async function DigestPage({
         },
       });
       if (dbRound) {
+        const computedCount = dbRound.clusters.reduce((sum, cluster) => sum + cluster.cards.length, 0);
+        if (dbRound.commentCount !== computedCount) {
+          logger.warn("Digest round count mismatch on load", {
+            roundId: dbRound.id,
+            storedCount: dbRound.commentCount,
+            computedCount,
+          });
+          await recomputeRoundCommentCount(dbRound.id);
+        }
         round = {
           id: dbRound.id,
           name: dbRound.name ?? "Digest",
           syncedAt: dbRound.syncedAt,
           executiveSummary: dbRound.executiveSummary ?? "",
-          commentCount: dbRound.commentCount,
+          commentCount: computedCount,
         };
         clusters = dbRound.clusters.map((c) => {
           const cardsWithPreview = c.cards.filter((card) => card.fullFrameUrl);
@@ -159,6 +163,16 @@ export default async function DigestPage({
             })),
           };
         });
+        viewClusters = clusters.map((cluster) => ({
+          ...cluster,
+          cards: cluster.cards.map((card) => ({
+            ...card,
+            comment: {
+              ...card.comment,
+              createdAtIso: card.comment.createdAt.toISOString(),
+            },
+          })),
+        }));
       }
     } catch {
       dbError = true;
@@ -208,10 +222,6 @@ export default async function DigestPage({
   }
 
   const totalComments = clusters.reduce((sum, c) => sum + c.cards.length, 0);
-  const resolvedClusters = clusters.filter((c) => c.status === "done").length;
-  const criticalCount = clusters.filter((c) =>
-    c.cards.some((card) => card.assessment?.priorityHint === "critical")
-  ).length;
 
   let summaryData: { summary: string; topIssues: string[]; sentiment: "positive" | "mixed" | "negative"; keyThemes: string[] } | null = null;
   if (round.executiveSummary) {
@@ -244,7 +254,7 @@ export default async function DigestPage({
                 })}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {round.commentCount} comments analyzed · {totalComments} in digest ·{" "}
+            {totalComments} comments in digest ·{" "}
             {new Date(round.syncedAt).toLocaleString(undefined, {
               month: "short",
               day: "numeric",
@@ -271,15 +281,6 @@ export default async function DigestPage({
         </div>
       </div>
 
-      <div className="mt-6">
-        <StatsBar
-          totalComments={totalComments}
-          totalClusters={clusters.length}
-          resolvedClusters={resolvedClusters}
-          criticalCount={criticalCount}
-        />
-      </div>
-
       {summaryData && (
         <div className="mt-6">
           <SummaryCard
@@ -291,121 +292,10 @@ export default async function DigestPage({
         </div>
       )}
 
-      <div className="mt-8">
-        {clusters.length === 0 ? (
-          <div className="glass rounded-lg p-8 text-center max-w-lg mx-auto">
-            <Filter className="size-6 mx-auto text-muted-foreground" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              {round.commentCount === 0
-                ? "No threads were added to this analysis. Usually every root comment is resolved in Figma, or threads were already used in a previous run. The product only includes unresolved root threads for new cards."
-                : "No issues found in this analysis."}
-            </p>
-          </div>
-        ) : (
-          <SectionedClusters clusters={clusters} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function priorityOrder(p: string): number {
-  switch (p) {
-    case "critical": return 0;
-    case "high": return 1;
-    case "medium": return 2;
-    case "low": return 3;
-    default: return 4;
-  }
-}
-
-function SectionedClusters({ clusters }: { clusters: DigestCluster[] }) {
-  const pages = new Map<string, Map<string, DigestCluster[]>>();
-
-  for (const cluster of clusters) {
-    const page = pageGroupKey(cluster.pageName);
-    const frame = frameGroupKey(cluster.frameName);
-    if (!pages.has(page)) pages.set(page, new Map());
-    const frames = pages.get(page)!;
-    if (!frames.has(frame)) frames.set(frame, []);
-    frames.get(frame)!.push(cluster);
-  }
-
-  for (const [, frames] of pages) {
-    for (const [, items] of frames) {
-      items.sort((a, b) => {
-        const aPriority = a.cards.find((c) => c.assessment)?.assessment?.priorityHint ?? "low";
-        const bPriority = b.cards.find((c) => c.assessment)?.assessment?.priorityHint ?? "low";
-        return priorityOrder(aPriority) - priorityOrder(bPriority);
-      });
-    }
-  }
-
-  return (
-    <div className="space-y-8">
-      {Array.from(pages.entries()).map(([pageName, frames]) => {
-        const pageIssueCount = Array.from(frames.values()).reduce((s, arr) => s + arr.length, 0);
-        const pageHeading =
-          pageName === "__page_unknown__" ? "Unnamed page" : pageName;
-        return (
-          <section key={pageName}>
-            <div className="flex items-center gap-2 mb-4">
-              <ChevronRight className="size-4 text-primary" />
-              <h2 className="font-heading text-lg font-semibold">{pageHeading}</h2>
-              <Badge variant="secondary" className="text-xs ml-1">
-                {pageIssueCount} issue{pageIssueCount !== 1 ? "s" : ""}
-              </Badge>
-            </div>
-            <div className="space-y-6">
-              {Array.from(frames.entries()).map(([frameName, items]) => (
-                <div key={frameName}>
-                  {frames.size > 1 && (
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 ml-1">
-                      {displayFrameSection(
-                        frameName === "__frame_unknown__" ? "" : frameName
-                      )}
-                    </p>
-                  )}
-                  <div className="space-y-3">
-                    {items.map((cluster) => {
-                      const topCard = cluster.cards
-                        .filter((c) => c.assessment)
-                        .sort((a, b) => priorityOrder(a.assessment!.priorityHint) - priorityOrder(b.assessment!.priorityHint))[0];
-
-                      const topPriority = topCard?.assessment?.priorityHint as Priority | undefined;
-
-                      return (
-                        <IssueCard
-                          key={cluster.id}
-                          clusterId={cluster.id}
-                          title={cluster.title}
-                          summary={cluster.summary}
-                          frameName={cluster.frameName}
-                          pageName={cluster.pageName}
-                          status={cluster.status}
-                          priority={topPriority}
-                          effortEstimate={cluster.effortEstimate}
-                          figmaDeepLink={cluster.cards.find((c) => c.figmaDeepLink)?.figmaDeepLink}
-                          suggestedAction={topCard?.assessment?.suggestedAction}
-                          thumbnailUrl={cluster.thumbnailUrl}
-                          comments={cluster.cards.map((card) => ({
-                            authorName: card.comment.authorName,
-                            authorImg: card.comment.authorImg,
-                            message: card.comment.message,
-                            createdAt: card.comment.createdAt.toISOString(),
-                            reactions: card.comment.reactions,
-                            replies: commentThreadToReplies(card.commentThread),
-                          }))}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        );
-      })}
+      <DigestView
+        initialClusters={viewClusters}
+        initialRoundCommentCount={round.commentCount}
+      />
     </div>
   );
 }

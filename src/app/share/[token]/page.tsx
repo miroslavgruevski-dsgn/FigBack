@@ -67,7 +67,10 @@ export default async function SharePage({
   }
 
   const totalComments = round.clusters.reduce((sum, c) => sum + c.cards.length, 0);
+  const openClusters = round.clusters.filter((c) => c.status === "open").length;
+  const inProgressClusters = round.clusters.filter((c) => c.status === "in_progress").length;
   const resolvedClusters = round.clusters.filter((c) => c.status === "done").length;
+  const dismissedClusters = round.clusters.filter((c) => c.status === "dismissed").length;
   const criticalCount = round.clusters.filter((c) =>
     c.cards.some((card) => card.assessment?.priorityHint === "critical")
   ).length;
@@ -90,6 +93,9 @@ export default async function SharePage({
           totalClusters={round.clusters.length}
           resolvedClusters={resolvedClusters}
           criticalCount={criticalCount}
+          openClusters={openClusters}
+          inProgressClusters={inProgressClusters}
+          dismissedClusters={dismissedClusters}
         />
       </div>
 

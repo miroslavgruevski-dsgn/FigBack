@@ -12,6 +12,7 @@ import { DeleteAnalysisButton } from "./delete-analysis-button";
 import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/error-state";
 import { ProjectAlerts, type ProjectAlertItem } from "@/components/project/project-alerts";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ type RoundWithFiles = {
   name: string | null;
   syncedAt: Date;
   commentCount: number;
+  computedCardCount: number;
   files?: { name: string; commentCount: number }[];
 };
 
@@ -122,9 +124,19 @@ export default async function ProjectPage({
         }
         return {
           id: r.id, name: r.name, syncedAt: r.syncedAt, commentCount: r.commentCount,
+          computedCardCount: r.cards.length,
           files: [...fileCounts.entries()].map(([name, count]) => ({ name, commentCount: count })),
         };
       });
+      for (const r of rounds) {
+        if (r.commentCount !== r.computedCardCount) {
+          logger.warn("Project page round count mismatch", {
+            roundId: r.id,
+            storedCount: r.commentCount,
+            computedCount: r.computedCardCount,
+          });
+        }
+      }
       project = { ...raw, rounds } as unknown as ProjectData;
 
       if (raw.rounds.length > 0) {
@@ -372,14 +384,30 @@ export default async function ProjectPage({
                         aria-hidden
                       />
                     </p>
-                    <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <MessageSquare className="size-3 shrink-0" />
-                      <span>
-                        {round.commentCount} in this analysis ·{" "}
-                        {new Date(round.syncedAt).toLocaleDateString()}
-                      </span>
-                    </p>
-                    {round.commentCount === 0 && (
+                  {(() => {
+                    const displayCount =
+                      round.commentCount === round.computedCardCount
+                        ? round.commentCount
+                        : round.computedCardCount;
+                    const countWasRepaired = round.commentCount !== round.computedCardCount;
+                    return (
+                      <>
+                        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <MessageSquare className="size-3 shrink-0" />
+                          <span>
+                            {displayCount} in this analysis ·{" "}
+                            {new Date(round.syncedAt).toLocaleDateString()}
+                          </span>
+                        </p>
+                        {countWasRepaired && (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Count refreshed from analysis cards.
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
+                    {round.computedCardCount === 0 && (
                       <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
                         Zero usually means every root thread was resolved in Figma or already used in
                         a prior analysis. Only unresolved roots are included.
