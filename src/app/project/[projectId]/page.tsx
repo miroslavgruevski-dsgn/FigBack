@@ -47,12 +47,21 @@ interface ProjectData {
 }
 
 function formatJobProgress(type: string, payload?: Record<string, unknown>): string {
+  const stage = typeof payload?.stage === "string" ? payload.stage : null;
   const label = typeof payload?.stageLabel === "string" ? payload.stageLabel : null;
   if (label) return label;
 
   const current = typeof payload?.progressCurrent === "number" ? payload.progressCurrent : null;
   const total = typeof payload?.progressTotal === "number" ? payload.progressTotal : null;
   const suffix = current !== null && total !== null && total > 0 ? ` ${current}/${total}` : "";
+
+  if (stage === "queued") return "Queued";
+  if (stage === "syncing") return `Syncing${suffix}`;
+  if (stage === "preparing") return `Preparing cards${suffix}`;
+  if (stage === "classifying") return `Classifying${suffix}`;
+  if (stage === "clustering") return "Clustering";
+  if (stage === "exporting_images") return `Exporting images${suffix}`;
+  if (stage === "export_done") return "Done";
 
   switch (type) {
     case "prepare_reanalysis":
@@ -231,6 +240,20 @@ export default async function ProjectPage({
   if (!project) notFound();
 
   const totalComments = project.files.reduce((sum, f) => sum + f._count.comments, 0);
+  const hasFilesLinked = project.files.length > 0;
+  const hasSyncedAnyFile = project.files.some((f) => !!f.lastSyncedAt);
+  const scopedFiles = project.files.filter(
+    (f) =>
+      (f.includedPages?.length ?? 0) > 0 || (f.includedFrames?.length ?? 0) > 0
+  );
+  const scopedStoredCount = scopedFiles.reduce((sum, f) => sum + f._count.comments, 0);
+  const analyzeDisabledReason = !hasFilesLinked
+    ? "Link at least one Figma file first."
+    : !hasSyncedAnyFile
+      ? "Sync project first."
+      : scopedFiles.length > 0 && scopedStoredCount === 0
+        ? "No comments in selected scope. Adjust Scope or sync again."
+        : null;
   const hasTokenError = project.files.some(
     (f) =>
       f.lastError &&
@@ -260,9 +283,15 @@ export default async function ProjectPage({
           <DeleteProjectButton projectId={projectId} projectName={project.name} />
           <ArchiveProjectButton projectId={projectId} archived={project.archived} />
           {project.rounds.length > 0 && <ReanalyzeButton projectId={projectId} />}
-          <GenerateDigestButton projectId={projectId} />
+          <GenerateDigestButton
+            projectId={projectId}
+            disabledReason={analyzeDisabledReason}
+          />
         </div>
       </div>
+      {analyzeDisabledReason && (
+        <p className="mt-2 text-xs text-muted-foreground">{analyzeDisabledReason}</p>
+      )}
 
       {newCommentCount > 0 && (
         <div className="mt-4 flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm">
@@ -279,6 +308,9 @@ export default async function ProjectPage({
           <p className="mt-0.5 text-xs text-muted-foreground">
             {formatJobProgress(activeJob.type, activeJob.payload ?? undefined)}{" "}
             <span className="uppercase tracking-wide">({activeJob.status})</span>
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Queued - Syncing - Preparing cards - Classifying - Clustering - Exporting images - Done
           </p>
         </div>
       )}

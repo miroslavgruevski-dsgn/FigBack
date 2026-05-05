@@ -125,9 +125,15 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
       });
       const pollResult = await runJobQueueUntilIdle({
         onProgress: (label) => setSyncStage(label),
+        projectId,
       });
       if (!pollResult.ok) {
-        toast.error(pollResult.error ?? "Sync failed");
+        toast.warning("Couldn't confirm completion in this tab", {
+          description:
+            pollResult.error === "Timed out waiting for background jobs"
+              ? "Sync may still be running on the server. Refresh this page in a minute."
+              : `${pollResult.error ?? "Network issue."} Refresh this page to check current status.`,
+        });
         return;
       }
       toast.success("Sync complete");
@@ -253,17 +259,24 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
                         <p className="text-sm font-medium leading-snug">{file.name}</p>
                         <p className="text-[11px] text-muted-foreground">
                           {hasScope
-                            ? `${file._count.comments} comments in scope`
-                            : `${file._count.comments} comments synced`}
+                            ? `Stored in scope now: ${file._count.comments}`
+                            : `Stored comments: ${file._count.comments}`}
                           {file.lastSyncedAt &&
                             ` · Synced ${new Date(file.lastSyncedAt).toLocaleDateString()}`}
                         </p>
+                        {file.lastSyncImportedCount !== null &&
+                          file.lastSyncImportedCount !== undefined && (
+                            <p className="text-[10px] text-muted-foreground/90 leading-snug">
+                              Latest run imported: {file.lastSyncImportedCount} comment
+                              {file.lastSyncImportedCount !== 1 ? "s" : ""}
+                            </p>
+                          )}
                         {figmaTotal !== null && (
                           <p className="text-[10px] text-muted-foreground/90 leading-snug">
-                            Last Figma API: {figmaTotal} comment
+                            Last sync API total: {figmaTotal} comment
                             {figmaTotal !== 1 ? "s" : ""}
                             {hasScope && skippedScope !== null && skippedScope > 0
-                              ? ` · ${skippedScope} skipped by scope`
+                              ? ` · Excluded by scope: ${skippedScope}`
                               : ""}
                           </p>
                         )}
@@ -494,6 +507,7 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
           fileId: file.id,
           includedPages: [...selectedPages],
           includedFrames: [...selectedFrames],
+          pruneOutOfScope: true,
         }),
       });
       router.refresh();

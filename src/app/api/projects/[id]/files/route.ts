@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
@@ -17,6 +18,7 @@ const patchSchema = z.object({
   fileId: z.string().min(1),
   includedPages: z.array(z.string()).optional(),
   includedFrames: z.array(z.string()).optional(),
+  pruneOutOfScope: z.boolean().optional(),
 });
 
 export async function POST(
@@ -132,6 +134,32 @@ export async function PATCH(
       }),
     },
   });
+
+  if (parsed.data.pruneOutOfScope) {
+    const pages = parsed.data.includedPages ?? updated.includedPages ?? [];
+    const frames = parsed.data.includedFrames ?? updated.includedFrames ?? [];
+    const hasPageFilter = pages.length > 0;
+    const hasFrameFilter = frames.length > 0;
+    if (hasPageFilter || hasFrameFilter) {
+      const outOfScope: Prisma.CommentWhereInput[] = [];
+      if (hasPageFilter) {
+        outOfScope.push({
+          OR: [{ pageId: null }, { pageId: { notIn: pages } }],
+        });
+      }
+      if (hasFrameFilter) {
+        outOfScope.push({
+          OR: [{ frameId: null }, { frameId: { notIn: frames } }],
+        });
+      }
+      await prisma.comment.deleteMany({
+        where: {
+          fileId: parsed.data.fileId,
+          OR: outOfScope,
+        },
+      });
+    }
+  }
 
   return NextResponse.json(updated);
 }

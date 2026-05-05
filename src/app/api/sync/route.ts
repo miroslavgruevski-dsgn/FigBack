@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createJobChain, hasActiveJob } from "@/lib/jobs";
+import { createJobChain, expireStaleJobs, hasActiveJob } from "@/lib/jobs";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { checkRateLimit } from "@/lib/rate-limit";
 
@@ -25,6 +25,8 @@ export async function POST(req: NextRequest) {
   }
 
   const { projectId } = parsed.data;
+
+  await expireStaleJobs(projectId);
 
   const existing = await hasActiveJob(projectId, "sync_full");
   if (existing) {

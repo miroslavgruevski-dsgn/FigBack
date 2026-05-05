@@ -75,6 +75,7 @@ export function ReanalyzeButton({ projectId }: { projectId: string }) {
         setStage("Preparing...");
         const pollResult = await runJobQueueUntilIdle({
           onProgress: (label) => setStage(label),
+          projectId,
         });
         if (!pollResult.ok) {
           toast.warning("Couldn't confirm completion in this tab", {

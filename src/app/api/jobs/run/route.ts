@@ -147,10 +147,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "CSRF rejected", code: "csrf_rejected" }, { status: 403 });
   }
 
-  const job = await getNextPendingJob();
+  let projectId: string | undefined;
+  try {
+    const body = await req.json();
+    if (body && typeof body.projectId === "string" && body.projectId.trim().length > 0) {
+      projectId = body.projectId.trim();
+    }
+  } catch {
+    // empty body is fine for backward compatibility
+  }
+
+  const job = await getNextPendingJob(projectId);
   if (!job) {
     const running = await prisma.job.findFirst({
-      where: { status: "running" },
+      where: {
+        status: "running",
+        ...(projectId ? { projectId } : {}),
+      },
       select: { type: true, payload: true },
     });
     if (running) {
@@ -662,7 +675,7 @@ export async function POST(req: NextRequest) {
       elapsedMs: Date.now() - runStartedAt,
     });
 
-    const next = await getNextPendingJob();
+    const next = await getNextPendingJob(projectId);
     return NextResponse.json({
       jobId: job.id,
       type: job.type,

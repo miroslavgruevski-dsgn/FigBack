@@ -95,10 +95,14 @@ export async function failJob(jobId: string, error: string) {
 
 const STUCK_RUNNING_MS = 2 * 60 * 1000; // 2 minutes
 
-export async function recoverStuckJobs() {
+export async function recoverStuckJobs(projectId?: string) {
   const cutoff = new Date(Date.now() - STUCK_RUNNING_MS);
   const stuck = await prisma.job.findMany({
-    where: { status: "running", startedAt: { lt: cutoff } },
+    where: {
+      status: "running",
+      startedAt: { lt: cutoff },
+      ...(projectId ? { projectId } : {}),
+    },
   });
   for (const job of stuck) {
     const shouldRetry = job.attempts < job.maxRetries;
@@ -114,10 +118,13 @@ export async function recoverStuckJobs() {
   return stuck.length;
 }
 
-export async function getNextPendingJob() {
-  await recoverStuckJobs();
+export async function getNextPendingJob(projectId?: string) {
+  await recoverStuckJobs(projectId);
   return prisma.job.findFirst({
-    where: { status: "pending" },
+    where: {
+      status: "pending",
+      ...(projectId ? { projectId } : {}),
+    },
     orderBy: { createdAt: "asc" },
   });
 }

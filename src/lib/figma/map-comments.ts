@@ -119,21 +119,11 @@ export function buildNodeIdToNameMap(tree: FigmaNode): Map<string, string> {
 
 export function applyIncludedSelectionFallback(
   mapped: MappedComment,
-  includedPages: string[],
-  includedFrames: string[],
+  _includedPages: string[],
+  _includedFrames: string[],
   idToName: Map<string, string>
 ): MappedComment {
   const out = { ...mapped };
-  if (!out.pageName && includedPages.length === 1) {
-    const id = includedPages[0];
-    out.pageId = out.pageId ?? id;
-    out.pageName = idToName.get(id) ?? out.pageName;
-  }
-  if (!out.frameName && includedFrames.length === 1) {
-    const id = includedFrames[0];
-    out.frameId = out.frameId ?? id;
-    out.frameName = idToName.get(id) ?? out.frameName;
-  }
   if (out.pageId && !out.pageName && idToName.has(out.pageId)) {
     out.pageName = idToName.get(out.pageId) ?? out.pageName;
   }

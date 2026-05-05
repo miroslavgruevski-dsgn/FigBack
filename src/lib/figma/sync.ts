@@ -239,13 +239,24 @@ async function syncFile(
 
   const upsertOps = [];
   let skippedScope = 0;
+  let skippedUnknownScope = 0;
 
   for (const { fc, mapped } of rows) {
+    if (hasPageFilter && !mapped.pageId) {
+      skippedScope++;
+      skippedUnknownScope++;
+      continue;
+    }
     if (hasPageFilter && mapped.pageId && !pageFilter.has(mapped.pageId)) {
       skippedScope++;
       continue;
     }
 
+    if (hasFrameFilter && !mapped.frameId) {
+      skippedScope++;
+      skippedUnknownScope++;
+      continue;
+    }
     if (hasFrameFilter && mapped.frameId && !frameFilter.has(mapped.frameId)) {
       skippedScope++;
       continue;
@@ -298,7 +309,10 @@ async function syncFile(
     upsertOps.length === 0 &&
     (hasPageFilter || hasFrameFilter)
   ) {
-    logger.warn("Figma returned comments but scope excluded all for this file", { fileId });
+    logger.warn("Figma returned comments but scope excluded all for this file", {
+      fileId,
+      skippedUnknownScope,
+    });
   }
 
   if (mode === "full") {

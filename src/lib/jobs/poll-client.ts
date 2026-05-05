@@ -13,9 +13,9 @@ export function formatJobStage(type: string | null | undefined): string {
   switch (type) {
     case "sync_full":
     case "sync_watch":
-      return "Syncing comments...";
+      return "Syncing...";
     case "prepare_reanalysis":
-      return "Preparing re-analysis...";
+      return "Preparing cards...";
     case "export_images":
     case "export_images_file":
       return "Exporting images...";
@@ -24,19 +24,26 @@ export function formatJobStage(type: string | null | undefined): string {
     case "cluster":
       return "Clustering...";
     default:
-      return "Processing...";
+      return "Queued...";
   }
 }
 
 export async function runJobQueueUntilIdle(options?: {
   onProgress?: (label: string) => void;
   maxWaitMs?: number;
+  projectId?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   const maxWait = options?.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const start = Date.now();
 
   while (Date.now() - start < maxWait) {
-    const res = await fetch("/api/jobs/run", { method: "POST" });
+    const res = await fetch("/api/jobs/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: options?.projectId ?? null,
+      }),
+    });
     const data = await parseResponseJson<{
       message?: string;
       status?: string;
