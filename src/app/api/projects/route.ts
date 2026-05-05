@@ -80,6 +80,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (e instanceof Error && e.name === "PrismaClientInitializationError") {
+      console.error(e);
+      return NextResponse.json(
+        {
+          error:
+            "Cannot connect to the database. Check DATABASE_URL, network access, and that the database is running.",
+          code: "db_unreachable",
+        },
+        { status: 503 }
+      );
+    }
+
     if (e instanceof Prisma.PrismaClientKnownRequestError) {
       if (e.code === "P2002") {
         return NextResponse.json(
@@ -94,6 +106,50 @@ export async function POST(req: NextRequest) {
             code: "prisma_fk",
           },
           { status: 400 }
+        );
+      }
+      if (e.code === "P1001" || e.code === "P1017") {
+        console.error(e);
+        return NextResponse.json(
+          {
+            error:
+              "Cannot reach the database server. Check DATABASE_URL and that your database accepts connections.",
+            code: "db_unreachable",
+          },
+          { status: 503 }
+        );
+      }
+      if (e.code === "P1003") {
+        console.error(e);
+        return NextResponse.json(
+          {
+            error:
+              "Database does not exist or DATABASE_URL points at the wrong database.",
+            code: "db_not_found",
+          },
+          { status: 503 }
+        );
+      }
+      if (e.code === "P2021") {
+        console.error(e);
+        return NextResponse.json(
+          {
+            error:
+              "Database schema is missing tables. Run migrations against this database (e.g. prisma migrate deploy).",
+            code: "migration_required",
+          },
+          { status: 503 }
+        );
+      }
+      if (e.code === "P2022") {
+        console.error(e);
+        return NextResponse.json(
+          {
+            error:
+              "Database is missing a column the app expects. Deploy the latest migrations to this database (prisma migrate deploy).",
+            code: "migration_required",
+          },
+          { status: 503 }
         );
       }
       console.error(e);
