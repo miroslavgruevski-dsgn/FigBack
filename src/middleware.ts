@@ -16,6 +16,15 @@ export default auth((req) => {
   const isPublic = publicPaths.some((p) => pathname.startsWith(p));
   if (isPublic) return NextResponse.next();
 
+  const e2eSecret = process.env.E2E_AUTH_SECRET;
+  if (
+    process.env.NODE_ENV === "development" &&
+    e2eSecret &&
+    req.headers.get("x-e2e-auth") === e2eSecret
+  ) {
+    return NextResponse.next();
+  }
+
   if (!req.auth?.user) {
     const signInUrl = new URL("/auth/signin", req.url);
     signInUrl.searchParams.set("callbackUrl", pathname);

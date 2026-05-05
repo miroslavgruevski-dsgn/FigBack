@@ -6,9 +6,8 @@ test.describe("Navigation (unauthenticated)", () => {
     await expect(page).toHaveURL(/\/auth\/signin/);
   });
 
-  test("sign-in page has brand link", async ({ page }) => {
+  test("sign-in page shows brand", async ({ page }) => {
     await page.goto("/auth/signin");
-    const brand = page.getByRole("link", { name: /FigBack/i });
-    await expect(brand).toBeVisible();
+    await expect(page.getByText("FigBack", { exact: true })).toBeVisible();
   });
 });

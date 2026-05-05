@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
-import { z } from "zod";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
 import { extractFileKey } from "@/lib/figma/client";
+import { createProjectBodySchema } from "@/lib/validation/project-create";
 
 const DUPLICATE_FILE_MSG =
   "This Figma file is already linked to another project. Remove it from that project first, or open that project instead.";
-
-const createSchema = z.object({
-  name: z.string().min(1).max(100),
-  urls: z.array(z.string().url()).min(1).max(20),
-});
 
 export async function GET() {
   const projects = await prisma.project.findMany({
@@ -44,7 +39,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const parsed = createSchema.safeParse(body);
+  const parsed = createProjectBodySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       {

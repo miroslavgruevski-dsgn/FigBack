@@ -8,21 +8,35 @@ function loopbackHost(host: string): string {
   return host;
 }
 
+function stripLeadingWww(host: string): string {
+  return host.startsWith("www.") ? host.slice(4) : host;
+}
+
+/** Normalize host for same-site comparison (loopback + optional www). */
+export function normalizeHostForCsrf(host: string): string {
+  return stripLeadingWww(loopbackHost(host));
+}
+
 export function isCsrfOriginAllowed(req: NextRequest): boolean {
   const origin = req.headers.get("origin");
   if (!origin) return true;
   try {
-    const originHost = loopbackHost(new URL(origin).host);
+    const originNorm = normalizeHostForCsrf(new URL(origin).host);
     const forwarded = req.headers
       .get("x-forwarded-host")
       ?.split(",")[0]
       ?.trim();
-    const headerHost = loopbackHost(req.headers.get("host")?.trim() ?? "");
-    const nextHost = loopbackHost(req.nextUrl.host);
+    const headerRaw = req.headers.get("host")?.trim() ?? "";
+    const reqUrlHost = normalizeHostForCsrf(new URL(req.url).host);
+    const nextHostNorm = normalizeHostForCsrf(req.nextUrl.host);
+    const forwardedNorm = forwarded ? normalizeHostForCsrf(forwarded) : "";
+    const headerNorm = headerRaw ? normalizeHostForCsrf(headerRaw) : "";
 
-    if (originHost === nextHost) return true;
-    if (forwarded && originHost === loopbackHost(forwarded)) return true;
-    if (headerHost && originHost === headerHost) return true;
+    const candidates = [nextHostNorm, reqUrlHost, forwardedNorm, headerNorm].filter(
+      Boolean
+    );
+
+    if (candidates.some((c) => c === originNorm)) return true;
     return false;
   } catch {
     return false;
