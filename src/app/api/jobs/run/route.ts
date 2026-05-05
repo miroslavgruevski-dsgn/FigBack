@@ -3,7 +3,8 @@ import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
 import { getNextPendingJob, claimJob, completeJob, failJob } from "@/lib/jobs";
 
-export const maxDuration = 60;
+/** Full sync + classify + cluster can exceed 60s; Vercel caps at plan max (often 300s). */
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   if (!isCsrfOriginAllowed(req)) {
