@@ -5,8 +5,9 @@ import type { JobType, JobStatus } from "@/types/digest";
 export async function createJob(
   type: JobType,
   projectId: string | null,
-  payload: Record<string, string>,
-  nextJobId?: string
+  payload: Record<string, unknown>,
+  nextJobId?: string,
+  status: JobStatus = "pending"
 ) {
   return prisma.job.create({
     data: {
@@ -14,13 +15,14 @@ export async function createJob(
       projectId,
       payload: payload as unknown as Prisma.InputJsonValue,
       nextJobId: nextJobId ?? null,
+      status,
     },
   });
 }
 
 export async function createJobChain(
   projectId: string,
-  steps: { type: JobType; payload: Record<string, string> }[]
+  steps: { type: JobType; payload: Record<string, unknown> }[]
 ) {
   if (steps.length === 0) return null;
 
@@ -166,4 +168,25 @@ export async function expireStaleJobs(projectId: string) {
     },
     data: { status: "failed", error: "Expired (stale)", doneAt: new Date() },
   });
+}
+
+export async function findQueuedJobByPayload(
+  projectId: string,
+  type: JobType,
+  payload: Record<string, unknown>
+) {
+  const jobs = await prisma.job.findMany({
+    where: {
+      projectId,
+      type,
+      status: { in: ["pending", "running", "waiting"] },
+      createdAt: { gt: jobActivityCutoff() },
+    },
+    select: { id: true, payload: true },
+  });
+
+  const target = JSON.stringify(payload);
+  const match = jobs.find((j) => JSON.stringify(j.payload) === target);
+  if (!match) return null;
+  return { id: match.id, payload: match.payload as Record<string, unknown> };
 }

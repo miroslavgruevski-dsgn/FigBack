@@ -23,7 +23,7 @@ export function ReanalyzeButton({ projectId }: { projectId: string }) {
 
   async function handleReanalyze() {
     setLoading(true);
-    setStage("Starting...");
+    setStage("Queued...");
     try {
       const res = await fetch("/api/reanalyze", {
         method: "POST",
@@ -72,6 +72,7 @@ export function ReanalyzeButton({ projectId }: { projectId: string }) {
       }
 
       if (jobsQueued) {
+        setStage("Preparing...");
         const pollResult = await runJobQueueUntilIdle({
           onProgress: (label) => setStage(label),
         });

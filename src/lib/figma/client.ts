@@ -10,8 +10,17 @@ import { FigmaApiError } from "@/lib/errors";
 
 const FIGMA_API = "https://api.figma.com/v1";
 const RATE_LIMIT_DELAY = 2000;
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 let lastRequestTime = 0;
+
+function figmaTimeoutMs(): number {
+  const raw = process.env.FIGMA_FETCH_TIMEOUT_MS;
+  if (!raw) return DEFAULT_TIMEOUT_MS;
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1_000) return DEFAULT_TIMEOUT_MS;
+  return Math.min(parsed, 120_000);
+}
 
 async function throttle() {
   const now = Date.now();
@@ -30,9 +39,26 @@ async function figmaFetch<T>(
   await throttle();
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const res = await fetch(`${FIGMA_API}${path}`, {
-      headers: { "X-Figma-Token": token },
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), figmaTimeoutMs());
+    let res: Response;
+    try {
+      res = await fetch(`${FIGMA_API}${path}`, {
+        headers: { "X-Figma-Token": token },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      const isAbort = err instanceof Error && err.name === "AbortError";
+      if (isAbort && attempt < retries) {
+        continue;
+      }
+      if (isAbort) {
+        throw new FigmaApiError("Figma API timeout", 504);
+      }
+      throw err;
+    }
+    clearTimeout(timeout);
 
     if (res.status === 429) {
       const retryAfter = parseInt(res.headers.get("retry-after") || "5", 10);

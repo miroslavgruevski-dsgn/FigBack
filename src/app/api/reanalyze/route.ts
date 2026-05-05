@@ -1,127 +1,148 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
-import { createJobChain, expireStaleJobs, findActiveJobWithPayload } from "@/lib/jobs";
-import { buildFigmaDeepLink } from "@/lib/figma/sync";
-import type { Prisma } from "@prisma/client";
+import { createJob, expireStaleJobs, findActiveJobWithPayload } from "@/lib/jobs";
+import { logger } from "@/lib/logger";
 
 const schema = z.object({
   projectId: z.string().min(1),
 });
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
-  if (!isCsrfOriginAllowed(req)) {
-    return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
-  }
-
-  const body = await req.json();
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid input" }, { status: 400 });
-  }
-
-  const { projectId } = parsed.data;
-
-  await expireStaleJobs(projectId);
-
-  const active = await findActiveJobWithPayload(projectId, "classify");
-  if (active) {
-    const roundId =
-      typeof active.payload.roundId === "string" ? active.payload.roundId : undefined;
-    return NextResponse.json({
-      message: "Re-analysis already in progress",
-      jobId: active.id,
-      roundId,
-      jobsQueued: true,
-    });
-  }
-
-  const rootCommentCount = await prisma.comment.count({
-    where: { file: { projectId }, parentId: null },
-  });
-  if (rootCommentCount === 0) {
-    return NextResponse.json({
-      message: "no_comments",
-      cardsCreated: 0,
-    });
-  }
-
-  // Reset processed flag so comments can be re-carded
-  await prisma.comment.updateMany({
-    where: { file: { projectId }, processed: true },
-    data: { processed: false },
-  });
-
-  const round = await prisma.reviewRound.create({
-    data: {
-      projectId,
-      name: `Re-analysis ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`,
-    },
-  });
-
-  // Create ReviewCards from existing comments
-  const rootComments = await prisma.comment.findMany({
-    where: { file: { projectId }, parentId: null, processed: false },
-    include: { file: { select: { fileKey: true } } },
-  });
-
-  const replyMap = new Map<string, { message: string; authorName: string; authorImg: string | null; createdAt: Date }[]>();
-  if (rootComments.length > 0) {
-    const replies = await prisma.comment.findMany({
-      where: { parentId: { in: rootComments.map((c) => c.id) } },
-      select: { parentId: true, message: true, authorName: true, authorImg: true, createdAt: true },
-      orderBy: { createdAt: "asc" },
-    });
-    for (const r of replies) {
-      if (!r.parentId) continue;
-      const list = replyMap.get(r.parentId) ?? [];
-      list.push({ message: r.message, authorName: r.authorName, authorImg: r.authorImg, createdAt: r.createdAt });
-      replyMap.set(r.parentId, list);
+  const startedAt = Date.now();
+  try {
+    if (!isCsrfOriginAllowed(req)) {
+      return NextResponse.json(
+        { error: "CSRF rejected", code: "csrf_rejected" },
+        { status: 403 }
+      );
     }
-  }
 
-  let created = 0;
-  for (const comment of rootComments) {
-    const thread = replyMap.get(comment.id) ?? [];
-    await prisma.reviewCard.create({
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON", code: "invalid_json" },
+        { status: 400 }
+      );
+    }
+
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid input", code: "validation_failed" },
+        { status: 400 }
+      );
+    }
+
+    const { projectId } = parsed.data;
+    await expireStaleJobs(projectId);
+
+    const activePrepare = await findActiveJobWithPayload(projectId, "prepare_reanalysis");
+    if (activePrepare) {
+      const roundId =
+        typeof activePrepare.payload.roundId === "string"
+          ? activePrepare.payload.roundId
+          : undefined;
+      return NextResponse.json({
+        message: "Re-analysis already in progress",
+        code: "already_in_progress",
+        jobId: activePrepare.id,
+        roundId,
+        jobsQueued: true,
+      });
+    }
+
+    const activeClassify = await findActiveJobWithPayload(projectId, "classify");
+    if (activeClassify) {
+      const roundId =
+        typeof activeClassify.payload.roundId === "string"
+          ? activeClassify.payload.roundId
+          : undefined;
+      return NextResponse.json({
+        message: "Re-analysis already in progress",
+        code: "already_in_progress",
+        jobId: activeClassify.id,
+        roundId,
+        jobsQueued: true,
+      });
+    }
+
+    const rootCommentCount = await prisma.comment.count({
+      where: { file: { projectId }, parentId: null, resolvedAt: null },
+    });
+    if (rootCommentCount === 0) {
+      return NextResponse.json({
+        message: "no_comments",
+        code: "no_comments",
+        cardsCreated: 0,
+      });
+    }
+
+    const round = await prisma.reviewRound.create({
       data: {
-        commentId: comment.id,
-        roundId: round.id,
-        commentThread: thread as unknown as Prisma.InputJsonValue,
-        frameName: comment.frameName ?? "Unknown",
-        pageName: comment.pageName ?? "Unknown",
-        figmaDeepLink: buildFigmaDeepLink(comment.file.fileKey, comment.nodeId),
+        projectId,
+        name: `Re-analysis ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`,
       },
     });
-    await prisma.comment.update({
-      where: { id: comment.id },
-      data: { processed: true },
+
+    const preparePayload = {
+      projectId,
+      roundId: round.id,
+      cursor: "",
+      chunkSize: 150,
+      totalRoots: rootCommentCount,
+      processedRoots: 0,
+      stage: "queued",
+      stageLabel: "Queued",
+    };
+
+    const firstJob = await createJob("prepare_reanalysis", projectId, preparePayload);
+    logger.info("Re-analysis queued", {
+      projectId,
+      roundId: round.id,
+      rootCommentCount,
+      elapsedMs: Date.now() - startedAt,
     });
-    created++;
-  }
 
-  await prisma.reviewRound.update({
-    where: { id: round.id },
-    data: { commentCount: created },
-  });
-
-  if (created === 0) {
-    await prisma.reviewRound.delete({ where: { id: round.id } }).catch(() => {});
     return NextResponse.json({
-      message: "no_cards_created",
-      cardsCreated: 0,
+      roundId: round.id,
+      jobsQueued: true,
+      jobId: firstJob.id,
+      message: "queued",
+      code: "reanalyze_queued",
     });
+  } catch (err) {
+    logger.error("Re-analyze start failed", {
+      error: err instanceof Error ? err.message : String(err),
+      elapsedMs: Date.now() - startedAt,
+    });
+    if (err instanceof Prisma.PrismaClientInitializationError) {
+      return NextResponse.json(
+        {
+          error: "Cannot connect to the database.",
+          code: "db_unreachable",
+        },
+        { status: 503 }
+      );
+    }
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      return NextResponse.json(
+        {
+          error: "Could not start re-analysis. Try again.",
+          code: `prisma_${err.code}`,
+        },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json(
+      { error: "Could not start re-analysis.", code: "server_error" },
+      { status: 500 }
+    );
   }
-
-  await createJobChain(projectId, [
-    { type: "classify", payload: { projectId, roundId: round.id } },
-    { type: "cluster", payload: { projectId, roundId: round.id } },
-  ]);
-
-  return NextResponse.json({
-    roundId: round.id,
-    cardsCreated: created,
-    jobsQueued: true,
-  });
 }

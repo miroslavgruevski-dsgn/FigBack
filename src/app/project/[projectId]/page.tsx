@@ -46,6 +46,32 @@ interface ProjectData {
   _count: { rounds: number };
 }
 
+function formatJobProgress(type: string, payload?: Record<string, unknown>): string {
+  const label = typeof payload?.stageLabel === "string" ? payload.stageLabel : null;
+  if (label) return label;
+
+  const current = typeof payload?.progressCurrent === "number" ? payload.progressCurrent : null;
+  const total = typeof payload?.progressTotal === "number" ? payload.progressTotal : null;
+  const suffix = current !== null && total !== null && total > 0 ? ` ${current}/${total}` : "";
+
+  switch (type) {
+    case "prepare_reanalysis":
+      return `Preparing threads${suffix}`;
+    case "sync_full":
+    case "sync_watch":
+      return `Syncing comments${suffix}`;
+    case "classify":
+      return `Classifying${suffix}`;
+    case "cluster":
+      return "Clustering";
+    case "export_images":
+    case "export_images_file":
+      return `Exporting images${suffix}`;
+    default:
+      return "Processing";
+  }
+}
+
 export default async function ProjectPage({
   params,
 }: {
@@ -58,6 +84,8 @@ export default async function ProjectPage({
   let newCommentCount = 0;
   let projectAlerts: ProjectAlertItem[] = [];
   let unresolvedRootCount = 0;
+  let activeJob: { type: string; status: string; payload: Record<string, unknown> | null } | null =
+    null;
 
   try {
     const { prisma } = await import("@/lib/db");
@@ -101,7 +129,7 @@ export default async function ProjectPage({
         });
       }
 
-      const [failedJobRow, teamCfg, ur] = await Promise.all([
+      const [failedJobRow, teamCfg, ur, activeJobRow] = await Promise.all([
         prisma.job.findFirst({
           where: { projectId, status: "failed" },
           orderBy: { doneAt: "desc" },
@@ -120,8 +148,20 @@ export default async function ProjectPage({
         prisma.comment.count({
           where: { file: { projectId }, parentId: null, resolvedAt: null },
         }),
+        prisma.job.findFirst({
+          where: { projectId, status: { in: ["pending", "running", "waiting"] } },
+          orderBy: { createdAt: "desc" },
+          select: { type: true, status: true, payload: true },
+        }),
       ]);
       unresolvedRootCount = ur;
+      activeJob = activeJobRow
+        ? {
+            type: activeJobRow.type,
+            status: activeJobRow.status,
+            payload: activeJobRow.payload as Record<string, unknown>,
+          }
+        : null;
 
       const failedJob =
         failedJobRow?.error === "Expired (stale)" ? null : failedJobRow;
@@ -230,6 +270,16 @@ export default async function ProjectPage({
           <span>
             <strong>{newCommentCount}</strong> new comment{newCommentCount !== 1 ? "s" : ""} since last analysis
           </span>
+        </div>
+      )}
+
+      {activeJob && (
+        <div className="mt-4 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-sm">
+          <p className="font-medium text-foreground">Background processing</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {formatJobProgress(activeJob.type, activeJob.payload ?? undefined)}{" "}
+            <span className="uppercase tracking-wide">({activeJob.status})</span>
+          </p>
         </div>
       )}
 

@@ -14,7 +14,10 @@ export function formatJobStage(type: string | null | undefined): string {
     case "sync_full":
     case "sync_watch":
       return "Syncing comments...";
+    case "prepare_reanalysis":
+      return "Preparing re-analysis...";
     case "export_images":
+    case "export_images_file":
       return "Exporting images...";
     case "classify":
       return "Classifying...";
@@ -41,6 +44,7 @@ export async function runJobQueueUntilIdle(options?: {
       nextType?: string | null;
       runningType?: string;
       error?: string;
+      progressLabel?: string;
     }>(res);
     if (!data) {
       return { ok: false, error: "Unexpected server response" };
@@ -55,12 +59,12 @@ export async function runJobQueueUntilIdle(options?: {
     }
 
     if (data.message === "jobs_running") {
-      options?.onProgress?.(formatJobStage(data.runningType));
+      options?.onProgress?.(data.progressLabel ?? formatJobStage(data.runningType));
       await delay(POLL_INTERVAL_MS);
       continue;
     }
 
-    options?.onProgress?.(formatJobStage(data.nextType));
+    options?.onProgress?.(data.progressLabel ?? formatJobStage(data.nextType));
 
     if (!data.hasMore) {
       return { ok: true };

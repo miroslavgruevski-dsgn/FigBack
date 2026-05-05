@@ -7,7 +7,9 @@ export type EffortEstimate = "small" | "medium" | "large";
 export type JobType =
   | "sync_watch"
   | "sync_full"
+  | "prepare_reanalysis"
   | "export_images"
+  | "export_images_file"
   | "classify"
   | "cluster";
 
