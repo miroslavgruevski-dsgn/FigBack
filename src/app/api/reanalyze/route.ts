@@ -33,6 +33,17 @@ export async function POST(req: NextRequest) {
       message: "Re-analysis already in progress",
       jobId: active.id,
       roundId,
+      jobsQueued: true,
+    });
+  }
+
+  const rootCommentCount = await prisma.comment.count({
+    where: { file: { projectId }, parentId: null },
+  });
+  if (rootCommentCount === 0) {
+    return NextResponse.json({
+      message: "no_comments",
+      cardsCreated: 0,
     });
   }
 
@@ -95,11 +106,22 @@ export async function POST(req: NextRequest) {
     data: { commentCount: created },
   });
 
-  // Chain classify → cluster
+  if (created === 0) {
+    await prisma.reviewRound.delete({ where: { id: round.id } }).catch(() => {});
+    return NextResponse.json({
+      message: "no_cards_created",
+      cardsCreated: 0,
+    });
+  }
+
   await createJobChain(projectId, [
     { type: "classify", payload: { projectId, roundId: round.id } },
     { type: "cluster", payload: { projectId, roundId: round.id } },
   ]);
 
-  return NextResponse.json({ roundId: round.id, cardsCreated: created });
+  return NextResponse.json({
+    roundId: round.id,
+    cardsCreated: created,
+    jobsQueued: true,
+  });
 }

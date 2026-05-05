@@ -8,6 +8,14 @@ import { runJobQueueUntilIdle } from "@/lib/jobs/poll-client";
 import { parseResponseJson } from "@/lib/parse-json-response";
 import { toast } from "sonner";
 
+type ReanalyzeOk = {
+  roundId?: string;
+  message?: string;
+  cardsCreated?: number;
+  jobsQueued?: boolean;
+  error?: string;
+};
+
 export function ReanalyzeButton({ projectId }: { projectId: string }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -23,29 +31,62 @@ export function ReanalyzeButton({ projectId }: { projectId: string }) {
         body: JSON.stringify({ projectId }),
       });
 
-      if (!res.ok) throw new Error("Failed to start re-analysis");
+      const data = (await parseResponseJson<ReanalyzeOk>(res)) ?? {};
 
-      const data =
-        (await parseResponseJson<{ roundId?: string; message?: string }>(res)) ?? {};
-      if (!data.roundId) {
-        toast.error("Could not start re-analysis. Try again in a moment.");
+      if (!res.ok) {
+        toast.error(data.error ?? `Couldn't start re-analysis (${res.status}).`);
         router.refresh();
         return;
       }
+
+      if (data.message === "no_comments") {
+        toast.message("Nothing to re-analyze", {
+          description: "This project has no top-level comment threads yet.",
+        });
+        router.refresh();
+        return;
+      }
+
+      if (data.message === "no_cards_created") {
+        toast.warning("Nothing was added to this run.", {
+          description: "Try syncing the file first, then run Re-analyze again.",
+        });
+        router.refresh();
+        return;
+      }
+
+      if (!data.roundId) {
+        toast.error("Could not start re-analysis.");
+        router.refresh();
+        return;
+      }
+
+      const jobsQueued = data.jobsQueued !== false;
+
       if (data.message?.includes("already in progress")) {
         toast.message("Re-analysis already running", {
-          description: "Finishing the current run.",
+          description: "Waiting for the background queue to finish.",
         });
       } else {
         toast.success("Re-analysis started!");
       }
-      const pollResult = await runJobQueueUntilIdle({
-        onProgress: (label) => setStage(label),
-      });
-      if (!pollResult.ok) {
-        toast.error(pollResult.error ?? "Job failed");
-        return;
+
+      if (jobsQueued) {
+        const pollResult = await runJobQueueUntilIdle({
+          onProgress: (label) => setStage(label),
+        });
+        if (!pollResult.ok) {
+          toast.warning("Couldn't confirm completion in this tab", {
+            description:
+              pollResult.error === "Timed out waiting for background jobs"
+                ? "Jobs may still be running on the server. Refresh this page in a minute or open Digest."
+                : `${pollResult.error ?? "Network or timeout."} Refresh this page or open Digest to see results.`,
+          });
+          router.refresh();
+          return;
+        }
       }
+
       router.push(`/project/${projectId}/digest?roundId=${data.roundId}`);
       router.refresh();
     } catch {

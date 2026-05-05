@@ -101,7 +101,7 @@ export default async function ProjectPage({
         });
       }
 
-      const [failedJob, teamCfg, ur] = await Promise.all([
+      const [failedJobRow, teamCfg, ur] = await Promise.all([
         prisma.job.findFirst({
           where: { projectId, status: "failed" },
           orderBy: { doneAt: "desc" },
@@ -122,6 +122,9 @@ export default async function ProjectPage({
         }),
       ]);
       unresolvedRootCount = ur;
+
+      const failedJob =
+        failedJobRow?.error === "Expired (stale)" ? null : failedJobRow;
 
       const alertList: ProjectAlertItem[] = [];
       if (failedJob?.error) {
