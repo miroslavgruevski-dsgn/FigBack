@@ -1,8 +1,19 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
-import { ExternalLink, ChevronDown, ChevronUp, Lightbulb, CheckCircle2, Circle, Loader2, ImageOff } from "lucide-react";
+import {
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Lightbulb,
+  CheckCircle2,
+  Circle,
+  Loader2,
+  ImageOff,
+  X,
+} from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PriorityBadge } from "./priority-badge";
 import { StatusBadge } from "./status-badge";
@@ -116,6 +127,7 @@ export function IssueCard({
 }: IssueCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [status, setStatus] = useState<IssueStatus>(initialStatus);
   const [updating, setUpdating] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -126,6 +138,10 @@ export function IssueCard({
   }, []);
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
     if (!lightboxOpen) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeLightbox();
@@ -133,6 +149,15 @@ export function IssueCard({
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [lightboxOpen, closeLightbox]);
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [lightboxOpen]);
 
   async function cycleStatus() {
     if (!clusterId || updating) return;
@@ -331,26 +356,75 @@ export function IssueCard({
         </div>
       )}
 
-      {lightboxOpen && thumbnailUrl && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm cursor-pointer"
-          onClick={closeLightbox}
-          onKeyDown={(e) => { if (e.key === "Escape") closeLightbox(); }}
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Preview of ${frameName}`}
-          tabIndex={-1}
-          ref={(el) => el?.focus()}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={thumbnailUrl}
-            alt={`Figma frame: ${frameName}`}
-            className="max-w-[90vw] max-h-[85vh] rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
+      {mounted &&
+        lightboxOpen &&
+        thumbnailUrl &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[200] flex flex-col text-white"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Full frame preview: ${title}`}
+          >
+            <button
+              type="button"
+              className="absolute inset-0 z-0 bg-black/92 backdrop-blur-sm"
+              aria-label="Close preview"
+              onClick={closeLightbox}
+            />
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col pointer-events-none">
+              <div className="pointer-events-auto flex shrink-0 items-start justify-end gap-2 p-3 sm:p-4">
+                <button
+                  type="button"
+                  onClick={closeLightbox}
+                  className="rounded-full bg-white/15 p-2.5 text-white shadow-lg ring-1 ring-white/20 transition hover:bg-white/25 focus-visible:outline focus-visible:ring-2 focus-visible:ring-white/80"
+                  aria-label="Close"
+                >
+                  <X className="size-5" strokeWidth={2.5} />
+                </button>
+              </div>
+
+              <div className="pointer-events-auto shrink-0 space-y-1 px-4 pb-2 text-center sm:px-8">
+                <p className="text-base font-semibold leading-snug sm:text-lg">{title}</p>
+                <p className="text-xs text-white/75 sm:text-sm">
+                  {formatFramePageLine(frameName, pageName)}
+                </p>
+                {comments[0] && (
+                  <p className="mx-auto max-w-2xl pt-1 text-xs leading-relaxed text-white/85 sm:text-sm">
+                    <span className="text-white/60">Comment · </span>
+                    <span className="font-medium text-white/95">{comments[0].authorName}</span>
+                    <span className="text-white/50"> · </span>
+                    <span className="line-clamp-3">{comments[0].message}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex min-h-0 flex-1 items-center justify-center px-3 pb-2 pt-1 sm:px-6">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={thumbnailUrl}
+                  alt={`Figma frame: ${frameName}`}
+                  className="pointer-events-auto max-h-[min(calc(100vh-14rem),900px)] w-auto max-w-[min(96vw,1200px)] rounded-lg object-contain shadow-2xl ring-1 ring-white/10"
+                />
+              </div>
+
+              {figmaDeepLink && (
+                <div className="pointer-events-auto flex shrink-0 justify-center px-4 pb-6 pt-1">
+                  <a
+                    href={figmaDeepLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white ring-1 ring-white/20 transition hover:bg-white/20"
+                  >
+                    <ExternalLink className="size-4" />
+                    Open pin in Figma
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
