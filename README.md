@@ -1,6 +1,6 @@
 # FigBack
 
-FigBack turns Figma comments into structured, prioritized feedback digests.
+FigBack is an AI-powered design feedback workspace that turns raw Figma comment threads into prioritized, actionable team workflows. It syncs comments, classifies and clusters issues, highlights risk and effort, generates executive summaries, and helps teams share outcomes through digest views and integrations like Slack and Confluence.
 
 ## One-click deploy (Vercel)
 
@@ -8,11 +8,11 @@ FigBack turns Figma comments into structured, prioritized feedback digests.
 
 After deploy, sign in and complete `/setup`. The app redirects to setup until required checks pass.
 
-## What teammates need to know
+## What Symphony teams need to know
 
 - Cloning this repo gives you code, not app data.
-- Each teammate should use their own `DATABASE_URL` for a clean environment.
-- Secrets are not shared through git. Every teammate sets their own `.env.local`.
+- Each team should use their own `DATABASE_URL` for a clean environment.
+- Secrets are not shared through git. Every team sets their own `.env.local`.
 
 ## 10-minute local setup
 
