@@ -1,5 +1,10 @@
 import type { NextConfig } from "next";
 
+const isProd = process.env.NODE_ENV === "production";
+const scriptSrc = isProd
+  ? "script-src 'self' 'unsafe-inline'"
+  : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
+
 const nextConfig: NextConfig = {
   turbopack: {
     root: ".",
@@ -30,7 +35,7 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              scriptSrc,
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://*.googleusercontent.com https://*.gravatar.com https://s3-alpha.figma.com https://figma-alpha-api.s3.us-west-2.amazonaws.com https://*.public.blob.vercel-storage.com https://picsum.photos",
               "font-src 'self' https://fonts.gstatic.com",

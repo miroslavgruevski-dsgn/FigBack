@@ -21,10 +21,6 @@ import { formatFramePageLine } from "@/lib/digest/display-labels";
 import type { Priority, IssueStatus } from "@/types/digest";
 import { toast } from "sonner";
 
-function normalizedSummaryLine(s: string): string {
-  return s.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
 interface ReactionData {
   emoji: string;
   count: number;
@@ -102,6 +98,8 @@ interface IssueCardProps {
   effortEstimate?: string | null;
   figmaDeepLink?: string | null;
   suggestedAction?: string | null;
+  needsClarify?: boolean;
+  ambiguityReason?: string | null;
   thumbnailUrl?: string | null;
   comments: CommentData[];
   onStatusChange?: (clusterId: string, status: IssueStatus) => void;
@@ -124,24 +122,28 @@ export function IssueCard({
   priority,
   figmaDeepLink,
   suggestedAction,
+  needsClarify,
+  ambiguityReason,
   thumbnailUrl,
   comments,
   onStatusChange,
 }: IssueCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
   const [status, setStatus] = useState<IssueStatus>(initialStatus);
   const [updating, setUpdating] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const canUsePortal = typeof document !== "undefined";
+  const totalThreadMessages = comments.reduce(
+    (sum, comment) => sum + 1 + (comment.replies?.length ?? 0),
+    0
+  );
+  const recommendation =
+    suggestedAction?.trim() || "Review this issue and define the next action.";
 
   const closeLightbox = useCallback(() => {
     setLightboxOpen(false);
     triggerRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    setMounted(true);
   }, []);
 
   useEffect(() => {
@@ -272,12 +274,23 @@ export function IssueCard({
         </div>
       </div>
 
-      {suggestedAction &&
-        normalizedSummaryLine(suggestedAction) !== normalizedSummaryLine(summary) && (
+      {(
         <div className="glass-tint rounded-md px-3 py-2.5 flex gap-2">
           <Lightbulb className="size-4 text-primary shrink-0 mt-0.5" />
-          <p className="text-sm text-foreground/90">{suggestedAction}</p>
+          <p className="text-sm text-foreground/90 line-clamp-1" title={recommendation}>
+            {recommendation}
+          </p>
         </div>
+      )}
+      {needsClarify && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-900 dark:text-amber-100">
+            Needs clarification
+          </span>
+        </div>
+      )}
+      {needsClarify && ambiguityReason && (
+        <p className="text-[11px] text-muted-foreground leading-relaxed">{ambiguityReason}</p>
       )}
 
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -306,9 +319,7 @@ export function IssueCard({
             ) : (
               <ChevronDown className="size-3.5 transition-transform duration-200" />
             )}
-            {expanded
-              ? "Hide comments"
-              : `Show ${comments.length} team comment${comments.length !== 1 ? "s" : ""}`}
+            {expanded ? `Hide comments (${totalThreadMessages})` : `Show comments (${totalThreadMessages})`}
           </button>
 
           <div className="expand-grid" data-expanded={expanded}>
@@ -370,7 +381,7 @@ export function IssueCard({
         </div>
       )}
 
-      {mounted &&
+      {canUsePortal &&
         lightboxOpen &&
         thumbnailUrl &&
         createPortal(

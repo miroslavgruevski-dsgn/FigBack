@@ -9,15 +9,16 @@ import { toast } from "sonner";
 
 export function FigmaTokenField({
   projectId,
-  defaultValue,
+  hasProjectOverride,
   autoOpen = false,
 }: {
   projectId: string;
-  defaultValue: string | null;
+  /** Server-known flag only; the token itself is never sent to the client. */
+  hasProjectOverride: boolean;
   autoOpen?: boolean;
 }) {
   const [open, setOpen] = useState(autoOpen);
-  const hasOverride = !!defaultValue;
+  const hasOverride = hasProjectOverride;
 
   async function saveToken(value: string) {
     try {
@@ -78,7 +79,8 @@ export function FigmaTokenField({
             id="project-figma-token"
             type="password"
             placeholder="Leave empty to use global token"
-            defaultValue={defaultValue ?? ""}
+            defaultValue=""
+            autoComplete="off"
             className="rounded-lg"
             onBlur={(e) => saveToken(e.target.value)}
           />

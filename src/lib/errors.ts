@@ -1,3 +1,5 @@
+import { NextResponse } from "next/server";
+
 export class FigmaApiError extends Error {
   constructor(
     message: string,
@@ -19,6 +21,9 @@ export function userMessageForFigmaHttpStatus(status: number): string {
   }
   if (status === 429) {
     return "Figma rate limit. Wait a bit and sync again.";
+  }
+  if (status === 504) {
+    return "Figma request timed out. Try again, or raise FIGMA_FETCH_TIMEOUT_MS if files are very large.";
   }
   return `Figma API error (${status}). Check the token and file access.`;
 }
@@ -42,4 +47,14 @@ export class JobError extends Error {
     super(message);
     this.name = "JobError";
   }
+}
+
+/** Stable JSON error body for API routes (no stack traces). */
+export function apiErrorJson(
+  status: number,
+  code: string,
+  message: string,
+  extra?: Record<string, unknown>
+) {
+  return NextResponse.json({ error: message, code, ...extra }, { status });
 }

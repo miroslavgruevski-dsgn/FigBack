@@ -19,6 +19,15 @@ The toast **"Could not create project. Try again."** matches the API **`error`**
 
 If the response body is **HTML** (sign-in page), the session expired: you were redirected by middleware, not by the route handler.
 
+## Fast teammate checks before deeper debugging
+
+If this is a fresh clone/fork setup, verify:
+
+1. `.env.local` exists and includes `DATABASE_URL`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_SECRET`.
+2. OAuth redirect URI includes the exact app URL (`/api/auth/callback/google`).
+3. `ALLOWED_EMAIL_DOMAIN` is correct for your team policy.
+4. `FIGMA_ACCESS_TOKEN` is set and has required scopes.
+
 ## Git bisect (find a regression)
 
 ```bash

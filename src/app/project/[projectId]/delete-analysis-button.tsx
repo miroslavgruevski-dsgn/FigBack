@@ -29,7 +29,7 @@ export function DeleteAnalysisButton({
   afterDelete?: "refresh" | "go-project";
   size?: "sm" | "icon";
   /** list: soft destructive chip (project page). outline: bordered icon (digest header). */
-  variant?: "list" | "outline";
+  variant?: "list" | "outline" | "menu-item";
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -61,22 +61,33 @@ export function DeleteAnalysisButton({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button
-            type="button"
-            variant={variant === "outline" ? "outline" : "destructive"}
-            size={size === "icon" ? "icon-sm" : "sm"}
-            className={
-              variant === "outline" && size === "icon"
-                ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:border-destructive/30 focus-visible:ring-destructive/25"
-                : variant === "list"
-                  ? "shrink-0 gap-1 border-destructive/20 bg-destructive/[0.06] hover:bg-destructive/15 focus-visible:border-destructive/40 focus-visible:ring-destructive/25"
-                  : undefined
-            }
-            aria-label={`Delete analysis ${analysisLabel}`}
-          >
-            <Trash2 className="size-3.5" />
-            {size !== "icon" && <span className="hidden sm:inline">Delete</span>}
-          </Button>
+          variant === "menu-item" ? (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
+              aria-label={`Delete analysis ${analysisLabel}`}
+            >
+              <Trash2 className="size-4" />
+              <span>Delete analysis</span>
+            </button>
+          ) : (
+            <Button
+              type="button"
+              variant={variant === "outline" ? "outline" : "destructive"}
+              size={size === "icon" ? "icon-sm" : "sm"}
+              className={
+                variant === "outline" && size === "icon"
+                  ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:border-destructive/30 focus-visible:ring-destructive/25"
+                  : variant === "list"
+                    ? "shrink-0 gap-1 border-destructive/20 bg-destructive/[0.06] hover:bg-destructive/15 focus-visible:border-destructive/40 focus-visible:ring-destructive/25"
+                    : undefined
+              }
+              aria-label={`Delete analysis ${analysisLabel}`}
+            >
+              <Trash2 className="size-3.5" />
+              {size !== "icon" && <span className="hidden sm:inline">Delete</span>}
+            </Button>
+          )
         }
       />
       <DialogContent

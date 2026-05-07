@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
@@ -22,7 +22,29 @@ const links = [
 
 export function MobileNav() {
   const [open, setOpen] = useState(false);
+  const [showSetupLink, setShowSetupLink] = useState(false);
   const pathname = usePathname();
+  const allLinks = showSetupLink
+    ? [{ href: "/setup", label: "Setup" }, ...links]
+    : links;
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/setup/status", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { ready?: boolean };
+        if (mounted) setShowSetupLink(!data.ready);
+      } catch {
+        // Ignore nav-level setup fetch failures.
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -36,7 +58,7 @@ export function MobileNav() {
           <SheetTitle className="font-heading text-lg">FigBack</SheetTitle>
         </SheetHeader>
         <nav className="mt-6 flex flex-col gap-1">
-          {links.map((link) => {
+          {allLinks.map((link) => {
             const active = link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
             return (
               <Link

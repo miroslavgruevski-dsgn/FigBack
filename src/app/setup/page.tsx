@@ -1,209 +1,105 @@
-"use client";
+import Link from "next/link";
+import { CheckCircle2, CircleDashed, Settings, ShieldCheck, Rocket } from "lucide-react";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
+import { canManageSettings } from "@/lib/api-guards";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { getSetupStatus } from "@/lib/setup-status";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import {
-  MessageSquare,
-  Check,
-  ArrowRight,
-  PenTool,
-  Brain,
-  Hash,
-  BookOpen,
-  Bell,
-  FolderPlus,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+const checkLabels = {
+  database: {
+    title: "Database connected",
+    hint: "Set DATABASE_URL and run migrations",
+  },
+  auth: {
+    title: "Google auth configured",
+    hint: "Set AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, and AUTH_SECRET",
+  },
+  figma: {
+    title: "Figma token configured",
+    hint: "Set FIGMA_ACCESS_TOKEN in env or in Settings",
+  },
+  llm: {
+    title: "LLM provider configured",
+    hint: "Set one LLM key in env or in Settings, or enable Skip LLM",
+  },
+  cron: {
+    title: "Cron secret configured",
+    hint: "Set CRON_SECRET for manual cron route calls",
+  },
+} as const;
 
-const steps = [
-  { icon: PenTool, label: "Figma" },
-  { icon: Brain, label: "LLM" },
-  { icon: Hash, label: "Slack" },
-  { icon: BookOpen, label: "Confluence" },
-  { icon: Bell, label: "Notifications" },
-  { icon: FolderPlus, label: "Project" },
-];
-
-export default function SetupPage() {
-  const router = useRouter();
-  const [step, setStep] = useState(0);
-
-  function next() {
-    if (step < steps.length - 1) {
-      setStep((s) => s + 1);
-    } else {
-      router.push("/");
-    }
+export default async function SetupPage() {
+  const status = await getSetupStatus();
+  if (status.ready) {
+    redirect("/");
   }
-
-  function skip() {
-    next();
-  }
+  const session = await auth();
+  const canEditSettings = canManageSettings(session?.user?.email ?? null);
+  const completedChecks = Object.values(status.checks).filter((v) => v === "ok").length;
+  const totalChecks = Object.keys(status.checks).length;
 
   return (
-    <div className="flex min-h-[calc(100dvh-3.5rem)] items-center justify-center px-4">
-      <div className="w-full max-w-lg">
-        <div className="text-center">
-          <div className="mx-auto flex size-12 items-center justify-center rounded-lg bg-primary/10">
-            <MessageSquare className="size-6 text-primary" />
+    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="glass rounded-lg p-6">
+        <div className="flex items-start gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <Rocket className="size-5 text-primary" />
           </div>
-          <h1 className="mt-4 font-heading text-2xl font-semibold">Set up FigBack</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Let&apos;s connect your tools. Takes about 3 minutes.
-          </p>
+          <div className="flex-1">
+            <h1 className="font-heading text-2xl font-semibold">Finish workspace setup</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Complete these checks once and your team can start using the portal.
+            </p>
+          </div>
         </div>
 
-        <div className="mt-8 flex items-center justify-center gap-2">
-          {steps.map((s, i) => (
-            <div
-              key={s.label}
-              className={`flex size-8 items-center justify-center rounded-full text-xs font-medium transition-colors ${
-                i < step
-                  ? "bg-primary text-primary-foreground"
-                  : i === step
-                    ? "bg-primary/20 text-primary"
-                    : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {i < step ? <Check className="size-3.5" /> : i + 1}
-            </div>
-          ))}
+        <div className="mt-4 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-sm">
+          <span className="font-medium">{completedChecks}/{totalChecks}</span> required checks are complete.
         </div>
 
-        <div className="glass mt-6 rounded-lg p-6">
-          <StepContent step={step} onNext={next} onSkip={skip} />
+        <div className="mt-5 space-y-2">
+          {Object.entries(status.checks).map(([key, value]) => {
+            const meta = checkLabels[key as keyof typeof checkLabels];
+            return (
+              <div
+                key={key}
+                className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-background/70 px-3 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{meta.title}</p>
+                  <p className="text-xs text-muted-foreground">{meta.hint}</p>
+                </div>
+                <span className="shrink-0 pt-0.5">
+                  {value === "ok" ? (
+                    <CheckCircle2 className="size-4 text-green-500" />
+                  ) : (
+                    <CircleDashed className="size-4 text-muted-foreground" />
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {!canEditSettings && (
+          <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+            Your account cannot edit team settings. Ask a settings admin to complete setup.
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Link href="/settings" className={cn(buttonVariants(), "rounded-lg")}>
+            <Settings className="mr-2 size-4" />
+            Open settings
+          </Link>
+          <Link href="/setup" className={cn(buttonVariants({ variant: "outline" }), "rounded-lg")}>
+            <ShieldCheck className="mr-2 size-4" />
+            Recheck
+          </Link>
         </div>
       </div>
     </div>
   );
-}
-
-function StepContent({
-  step,
-  onNext,
-  onSkip,
-}: {
-  step: number;
-  onNext: () => void;
-  onSkip: () => void;
-}) {
-  switch (step) {
-    case 0:
-      return (
-        <div className="space-y-4">
-          <h2 className="font-heading text-lg font-semibold">Verify Figma Connection</h2>
-          <p className="text-sm text-muted-foreground">
-            Your Figma access token is set via environment variables. Let&apos;s verify it works.
-          </p>
-          <Button onClick={onNext} className="w-full btn-gradient rounded-lg">
-            Verify Connection
-            <ArrowRight className="ml-2 size-4" />
-          </Button>
-        </div>
-      );
-    case 1:
-      return (
-        <div className="space-y-4">
-          <h2 className="font-heading text-lg font-semibold">Choose LLM Provider</h2>
-          <p className="text-sm text-muted-foreground">
-            Select which LLM provider to use for comment classification.
-          </p>
-          <div className="grid gap-2">
-            {["Google Gemini", "OpenAI GPT", "Anthropic Claude"].map((p) => (
-              <button
-                key={p}
-                className="glass glass-hover rounded-lg px-4 py-3 text-left text-sm font-medium"
-                onClick={onNext}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    case 2:
-      return (
-        <div className="space-y-4">
-          <h2 className="font-heading text-lg font-semibold">Connect Slack</h2>
-          <p className="text-sm text-muted-foreground">
-            Get notified about new comments in your Slack channel.
-          </p>
-          <div className="space-y-2">
-            <Label htmlFor="slack">Webhook URL</Label>
-            <Input id="slack" placeholder="https://hooks.slack.com/services/..." className="rounded-lg" />
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onSkip} className="flex-1 rounded-lg">
-              Skip
-            </Button>
-            <Button onClick={onNext} className="flex-1 btn-gradient rounded-lg">
-              Connect
-            </Button>
-          </div>
-        </div>
-      );
-    case 3:
-      return (
-        <div className="space-y-4">
-          <h2 className="font-heading text-lg font-semibold">Connect Confluence</h2>
-          <p className="text-sm text-muted-foreground">
-            Push digest reports directly to Confluence.
-          </p>
-          <div className="space-y-2">
-            <Label htmlFor="confluence">Confluence URL</Label>
-            <Input id="confluence" placeholder="https://your-team.atlassian.net" className="rounded-lg" />
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onSkip} className="flex-1 rounded-lg">
-              Skip
-            </Button>
-            <Button onClick={onNext} className="flex-1 btn-gradient rounded-lg">
-              Connect
-            </Button>
-          </div>
-        </div>
-      );
-    case 4:
-      return (
-        <div className="space-y-4">
-          <h2 className="font-heading text-lg font-semibold">Enable Notifications</h2>
-          <p className="text-sm text-muted-foreground">
-            Get push notifications when new comments are detected on your designs.
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onSkip} className="flex-1 rounded-lg">
-              Skip
-            </Button>
-            <Button onClick={onNext} className="flex-1 btn-gradient rounded-lg">
-              Enable
-            </Button>
-          </div>
-        </div>
-      );
-    case 5:
-      return (
-        <div className="space-y-4">
-          <h2 className="font-heading text-lg font-semibold">Create First Project</h2>
-          <p className="text-sm text-muted-foreground">
-            Name your project and paste Figma file URLs to start tracking.
-          </p>
-          <div className="space-y-2">
-            <Label htmlFor="project-name">Project name</Label>
-            <Input id="project-name" placeholder="e.g. Checkout Redesign" className="rounded-lg" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="figma-url">Figma file URL</Label>
-            <Input id="figma-url" placeholder="https://www.figma.com/file/..." className="rounded-lg" />
-          </div>
-          <Button onClick={onNext} className="w-full btn-gradient rounded-lg">
-            Create & Start Watching
-            <ArrowRight className="ml-2 size-4" />
-          </Button>
-        </div>
-      );
-    default:
-      return null;
-  }
 }

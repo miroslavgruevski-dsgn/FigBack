@@ -4,13 +4,23 @@ import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
 import { extractFileKey } from "@/lib/figma/client";
 import { createProjectBodySchema } from "@/lib/validation/project-create";
+import { requireApiSession } from "@/lib/api-guards";
 
 const DUPLICATE_FILE_MSG =
   "This Figma file is already linked to another project. Remove it from that project first, or open that project instead.";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const guard = await requireApiSession();
+  if (!guard.ok) return guard.response;
+
+  const includeArchivedParam = req.nextUrl.searchParams.get("includeArchived");
+  const includeArchived =
+    includeArchivedParam === "1" ||
+    includeArchivedParam === "true" ||
+    includeArchivedParam === "all";
+
   const projects = await prisma.project.findMany({
-    where: { archived: false },
+    where: includeArchived ? undefined : { archived: false },
     include: {
       files: { select: { id: true, name: true, fileKey: true, lastError: true, lastSyncedAt: true } },
       _count: { select: { rounds: true } },
@@ -22,6 +32,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await requireApiSession();
+  if (!guard.ok) return guard.response;
+
   if (!isCsrfOriginAllowed(req)) {
     return NextResponse.json(
       { error: "CSRF rejected", code: "csrf_rejected" },
@@ -57,7 +70,7 @@ export async function POST(req: NextRequest) {
     const files = urls.map((url) => {
       const fileKey = extractFileKey(url);
       if (!fileKey) throw new Error(`Invalid Figma URL: ${url}`);
-      return { fileKey, url, name: `File ${fileKey.slice(0, 8)}` };
+      return { fileKey, url, name: fileKey };
     });
 
     const project = await prisma.project.create({

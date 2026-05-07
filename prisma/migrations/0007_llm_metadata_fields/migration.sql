@@ -1,0 +1,6 @@
+ALTER TABLE "ReviewRound"
+ADD COLUMN "summarySource" TEXT;
+
+ALTER TABLE "LLMAssessment"
+ADD COLUMN "source" TEXT NOT NULL DEFAULT 'llm',
+ADD COLUMN "confidence" DOUBLE PRECISION;

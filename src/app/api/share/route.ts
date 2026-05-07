@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { createShareToken } from "@/lib/integrations/share-link";
+import { requireApiSession } from "@/lib/api-guards";
 
 const shareSchema = z.object({
   projectId: z.string().min(1),
@@ -9,6 +10,9 @@ const shareSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const guard = await requireApiSession();
+  if (!guard.ok) return guard.response;
+
   if (!isCsrfOriginAllowed(req)) {
     return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
   }

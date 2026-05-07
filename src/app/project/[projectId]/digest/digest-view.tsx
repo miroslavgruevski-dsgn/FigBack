@@ -46,6 +46,8 @@ export interface DigestClusterView {
       suggestedAction: string;
       needsClarify: boolean;
       ambiguityReason: string | null;
+      source: "llm" | "heuristic";
+      confidence: number | null;
     } | null;
   }[];
 }
@@ -247,6 +249,8 @@ function SectionedClusters({
                           effortEstimate={cluster.effortEstimate}
                           figmaDeepLink={cluster.cards.find((c) => c.figmaDeepLink)?.figmaDeepLink}
                           suggestedAction={topCard?.assessment?.suggestedAction}
+                          needsClarify={topCard?.assessment?.needsClarify}
+                          ambiguityReason={topCard?.assessment?.ambiguityReason}
                           thumbnailUrl={cluster.thumbnailUrl}
                           onStatusChange={onStatusChange}
                           comments={cluster.cards.map((card) => ({

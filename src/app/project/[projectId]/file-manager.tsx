@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import type { MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -390,6 +391,7 @@ export function FileManager({ projectId, files, hasTokenError }: FileManagerProp
                     <PageSelector
                       projectId={projectId}
                       file={file}
+                      hasTokenError={hasTokenError}
                       onClose={() => setConfigureFileId(null)}
                     />
                   )}
@@ -412,11 +414,19 @@ interface PageNode {
 interface PageSelectorProps {
   projectId: string;
   file: FigmaFileData;
+  hasTokenError: boolean;
   onClose: () => void;
 }
 
-function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
+type ScopePreset = "full" | "limited";
+
+function PageSelector({ projectId, file, hasTokenError, onClose }: PageSelectorProps) {
   const router = useRouter();
+  const initialHasSelection =
+    (file.includedPages?.length ?? 0) > 0 || (file.includedFrames?.length ?? 0) > 0;
+  const [scopePreset, setScopePreset] = useState<ScopePreset>(
+    initialHasSelection ? "limited" : "full"
+  );
   const [pages, setPages] = useState<PageNode[] | null>(null);
   const [selectedPages, setSelectedPages] = useState<Set<string>>(
     new Set(file.includedPages ?? [])
@@ -428,22 +438,42 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  /** Index in `pages` for Shift+click range selection between pages */
+  const pageRangeAnchorRef = useRef<number | null>(null);
+  /** Sibling index under `pageId` for Shift+click among frames on one page */
+  const frameRangeAnchorRef = useRef<{ pageId: string; index: number } | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     fetch(`/api/projects/${projectId}/files/pages?fileId=${file.id}`)
       .then(async (res) => {
-        if (!res.ok) throw new Error("Failed to fetch pages");
-        return parseResponseJson<{ pages: PageNode[] }>(res);
-      })
-      .then((data) => {
-        if (!data?.pages) throw new Error("Failed to fetch pages");
-        setPages(data.pages);
-        setLoading(false);
+        const data = await parseResponseJson<{
+          pages?: PageNode[];
+          error?: string;
+        }>(res);
+        if (!res.ok) {
+          throw new Error(
+            data?.error ??
+              "Could not load pages from Figma. Check your token and that the file is reachable."
+          );
+        }
+        if (!data?.pages) {
+          throw new Error(data?.error ?? "Unexpected response while loading pages.");
+        }
+        if (!cancelled) {
+          setPages(data.pages);
+          setLoading(false);
+        }
       })
       .catch((err) => {
-        setFetchError(err.message);
-        setLoading(false);
+        if (!cancelled) {
+          setFetchError(err instanceof Error ? err.message : "Failed to fetch pages");
+          setLoading(false);
+        }
       });
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, file.id]);
 
   function togglePage(pageId: string) {
@@ -458,6 +488,24 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
     });
   }
 
+  function handlePageClick(pageId: string, pageIndex: number, e: MouseEvent) {
+    if (!pages) return;
+    if (e.shiftKey && pageRangeAnchorRef.current !== null) {
+      const from = Math.min(pageRangeAnchorRef.current, pageIndex);
+      const to = Math.max(pageRangeAnchorRef.current, pageIndex);
+      setSelectedPages((prev) => {
+        const next = new Set(prev);
+        for (let i = from; i <= to; i++) {
+          next.add(pages[i].id);
+        }
+        return next;
+      });
+      return;
+    }
+    pageRangeAnchorRef.current = pageIndex;
+    togglePage(pageId);
+  }
+
   function toggleFrame(frameId: string) {
     setSelectedFrames((prev) => {
       const next = new Set(prev);
@@ -468,6 +516,34 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
       }
       return next;
     });
+  }
+
+  function handleFrameClick(
+    frameId: string,
+    pageId: string,
+    siblingIndex: number,
+    siblings: { id: string }[],
+    e: MouseEvent
+  ) {
+    if (
+      e.shiftKey &&
+      frameRangeAnchorRef.current?.pageId === pageId &&
+      frameRangeAnchorRef.current !== null
+    ) {
+      const from = Math.min(frameRangeAnchorRef.current.index, siblingIndex);
+      const to = Math.max(frameRangeAnchorRef.current.index, siblingIndex);
+      setSelectedFrames((prev) => {
+        const next = new Set(prev);
+        for (let i = from; i <= to; i++) {
+          const f = siblings[i];
+          if (f) next.add(f.id);
+        }
+        return next;
+      });
+      return;
+    }
+    frameRangeAnchorRef.current = { pageId, index: siblingIndex };
+    toggleFrame(frameId);
   }
 
   function toggleExpand(pageId: string) {
@@ -493,27 +569,63 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
   }
 
   function clearAll() {
+    pageRangeAnchorRef.current = null;
+    frameRangeAnchorRef.current = null;
     setSelectedPages(new Set());
     setSelectedFrames(new Set());
   }
 
+  function expandAll() {
+    if (!pages) return;
+    setExpandedPages(new Set(pages.map((p) => p.id)));
+  }
+
+  function collapseExpand() {
+    setExpandedPages(new Set());
+  }
+
   async function handleSave() {
+    if (scopePreset === "limited" && selectedPages.size === 0 && selectedFrames.size === 0) {
+      toast.error("Select at least one page or frame", {
+        description: "Or switch to Full file to sync everything.",
+      });
+      return;
+    }
+
+    const includedPages = scopePreset === "full" ? [] : [...selectedPages];
+    const includedFrames = scopePreset === "full" ? [] : [...selectedFrames];
+
     setSaving(true);
     try {
-      await fetch(`/api/projects/${projectId}/files`, {
+      const res = await fetch(`/api/projects/${projectId}/files`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileId: file.id,
-          includedPages: [...selectedPages],
-          includedFrames: [...selectedFrames],
+          includedPages,
+          includedFrames,
           pruneOutOfScope: true,
         }),
       });
+      if (!res.ok) {
+        const data = await parseResponseJson<{ error?: string }>(res);
+        toast.error(data?.error ?? "Could not save scope");
+        return;
+      }
+      toast.success(
+        scopePreset === "full"
+          ? "Scope: full file"
+          : `Scope: ${includedPages.length} page${includedPages.length !== 1 ? "s" : ""}${
+              includedFrames.length
+                ? `, ${includedFrames.length} frame${includedFrames.length !== 1 ? "s" : ""}`
+                : ""
+            }`
+      );
       router.refresh();
       onClose();
     } catch {
       setFetchError("Failed to save");
+      toast.error("Failed to save scope");
     } finally {
       setSaving(false);
     }
@@ -521,26 +633,113 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
 
   return (
     <div className="mx-3 mb-2 rounded-md border border-border bg-background p-3 space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium">
-          Select pages &amp; frames to include
-          <span className="text-muted-foreground ml-1">(empty = all)</span>
-        </p>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium">Sync scope</p>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground shrink-0">
           <X className="size-3.5" />
         </button>
       </div>
+
+      <div className="flex rounded-lg border border-border p-0.5 gap-0.5">
+        <button
+          type="button"
+          className={cn(
+            "flex-1 rounded-md py-2 text-xs font-medium transition-colors",
+            scopePreset === "full"
+              ? "bg-muted text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+          onClick={() => setScopePreset("full")}
+        >
+          Full file
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "flex-1 rounded-md py-2 text-xs font-medium transition-colors",
+            scopePreset === "limited"
+              ? "bg-muted text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+          onClick={() => setScopePreset("limited")}
+        >
+          Selected pages
+        </button>
+      </div>
+
+      {scopePreset === "full" ? (
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Every page is included when you sync. Switch to <strong className="text-foreground">Selected pages</strong>{" "}
+          to store comments only from specific canvases or frames.
+        </p>
+      ) : (
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Click pages to turn them on or off (multiple allowed).{" "}
+          <strong className="text-foreground">Shift-click</strong> a second page to select every page in between. Expand a page to pick{" "}
+          <strong className="text-foreground">frames</strong> only.
+        </p>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-3">
           <Loader2 className="size-4 animate-spin text-muted-foreground" />
         </div>
       ) : fetchError ? (
-        <p className="text-xs text-destructive">{fetchError}</p>
+        <div className="space-y-2 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2.5">
+          <p className="text-xs text-destructive leading-relaxed">{fetchError}</p>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Use a{" "}
+            <a
+              href="https://www.figma.com/developers/api#access-tokens"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2 text-foreground"
+            >
+              Figma personal access token
+            </a>{" "}
+            with file read access to this file. Add it in{" "}
+            <a href="#figma-token-section" className="underline underline-offset-2 text-foreground">
+              this project
+            </a>{" "}
+            or{" "}
+            <a href="/settings" className="underline underline-offset-2 text-foreground">
+              Settings
+            </a>
+            .
+            {hasTokenError ? (
+              <>
+                {" "}
+                The token field below may need updating.
+              </>
+            ) : null}
+          </p>
+        </div>
       ) : pages && pages.length > 0 ? (
         <>
-          <div className="space-y-0.5 max-h-64 overflow-y-auto">
-            {pages.map((page) => {
+          {scopePreset === "limited" ? (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 rounded-md text-[10px] px-2"
+                  onClick={expandAll}
+                >
+                  Expand pages
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 rounded-md text-[10px] px-2"
+                  onClick={collapseExpand}
+                >
+                  Collapse all
+                </Button>
+              </div>
+              <div className="space-y-0.5 max-h-64 overflow-y-auto">
+            {pages.map((page, pageIndex) => {
               const hasChildren = page.children && page.children.length > 0;
               const isExpanded = expandedPages.has(page.id);
               return (
@@ -549,7 +748,10 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
                     {hasChildren ? (
                       <button
                         type="button"
-                        onClick={() => toggleExpand(page.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpand(page.id);
+                        }}
                         className="p-0.5 text-muted-foreground hover:text-foreground shrink-0"
                       >
                         {isExpanded ? (
@@ -563,24 +765,44 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
                     )}
                     <button
                       type="button"
-                      onClick={() => togglePage(page.id)}
-                      className="flex items-center gap-2 flex-1 text-sm text-left"
+                      onClick={(e) => handlePageClick(page.id, pageIndex, e)}
+                      title="Click to toggle. Shift-click another page to select the range."
+                      className="flex items-center gap-2 flex-1 text-sm text-left rounded-md min-h-9"
                     >
                       <Checkbox checked={selectedPages.has(page.id)} />
-                      <span className="truncate">{page.name}</span>
+                      <span className="truncate">
+                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground mr-1.5">
+                          Page
+                        </span>
+                        {page.name}
+                      </span>
                     </button>
                   </div>
                   {hasChildren && isExpanded && (
                     <div className="ml-5 border-l border-border/40 pl-2 space-y-0.5">
-                      {page.children!.map((frame) => (
+                      {page.children!.map((frame, frameIndex) => (
                         <button
                           key={frame.id}
                           type="button"
-                          onClick={() => toggleFrame(frame.id)}
-                          className="flex items-center gap-2 rounded px-1 py-1 hover:bg-muted/50 w-full text-left text-sm"
+                          onClick={(e) =>
+                            handleFrameClick(
+                              frame.id,
+                              page.id,
+                              frameIndex,
+                              page.children!,
+                              e
+                            )
+                          }
+                          title="Click to toggle. Shift-click another frame on this page for a range."
+                          className="flex items-center gap-2 rounded px-1 py-1 hover:bg-muted/50 w-full text-left text-sm min-h-9"
                         >
                           <Checkbox checked={selectedFrames.has(frame.id)} />
-                          <span className="truncate">{frame.name}</span>
+                          <span className="truncate">
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground mr-1.5">
+                              Frame
+                            </span>
+                            {frame.name}
+                          </span>
                           <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
                             {frame.type.toLowerCase()}
                           </span>
@@ -591,33 +813,46 @@ function PageSelector({ projectId, file, onClose }: PageSelectorProps) {
                 </div>
               );
             })}
-          </div>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="flex-1 rounded-lg text-xs"
-              onClick={selectAll}
-            >
-              Select all
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="flex-1 rounded-lg text-xs"
-              onClick={clearAll}
-            >
-              Clear all
-            </Button>
-            <Button
-              size="sm"
-              className="flex-1 btn-gradient rounded-lg text-xs"
-              onClick={handleSave}
-              disabled={saving}
-            >
-              {saving ? <Loader2 className="size-3 animate-spin" /> : "Save"}
-            </Button>
-          </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 rounded-lg text-xs"
+                  onClick={selectAll}
+                >
+                  Select all
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 rounded-lg text-xs"
+                  onClick={clearAll}
+                >
+                  Clear all
+                </Button>
+                <Button
+                  size="sm"
+                  className="flex-1 btn-gradient rounded-lg text-xs"
+                  onClick={handleSave}
+                  disabled={saving}
+                >
+                  {saving ? <Loader2 className="size-3 animate-spin" /> : "Save"}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex gap-2 pt-1">
+              <Button
+                size="sm"
+                className="flex-1 btn-gradient rounded-lg text-xs"
+                onClick={handleSave}
+                disabled={saving}
+              >
+                {saving ? <Loader2 className="size-3 animate-spin" /> : "Save scope"}
+              </Button>
+            </div>
+          )}
         </>
       ) : (
         <p className="text-xs text-muted-foreground">No pages found in this file.</p>

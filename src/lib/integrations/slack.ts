@@ -51,6 +51,26 @@ export async function postSlackDigest(
   }
 }
 
+export async function testSlackWebhook(
+  webhookUrl: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: "FigBack preflight test: Slack integration is configured.",
+      }),
+    });
+    if (!res.ok) {
+      return { ok: false, error: `Slack responded with ${res.status}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
 function buildDigestBlocks(payload: DigestPayload): SlackBlock[] {
   const criticalNote =
     payload.criticalCount > 0 ? `  \u2022  :rotating_light: *${payload.criticalCount} critical*` : "";

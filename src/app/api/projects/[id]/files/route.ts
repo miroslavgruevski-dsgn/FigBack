@@ -52,7 +52,7 @@ export async function POST(
     );
   }
 
-  let fileName = `File ${fileKey.slice(0, 8)}`;
+  let fileName = fileKey;
   try {
     const token = await getFigmaToken(id);
     if (token) {
@@ -60,7 +60,7 @@ export async function POST(
       if (figmaData.name) fileName = figmaData.name;
     }
   } catch {
-    // keep placeholder if Figma API fails
+    // Keep a deterministic fallback name if Figma metadata fetch fails.
   }
 
   const file = await prisma.figmaFile.create({

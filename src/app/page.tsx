@@ -9,12 +9,15 @@ import {
   Sparkles,
   Archive,
 } from "lucide-react";
+import { redirect } from "next/navigation";
 import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { QuickCreate } from "@/components/dashboard/quick-create";
 import { DeleteProjectButton } from "./project/[projectId]/delete-project-button";
+import { ArchiveProjectButton } from "./project/[projectId]/archive-project-button";
 import { cn } from "@/lib/utils";
+import { getSetupStatus } from "@/lib/setup-status";
 
 import type { Metadata } from "next";
 
@@ -61,12 +64,26 @@ interface Project {
   id: string;
   name: string;
   description: string | null;
+  archived?: boolean;
+  updatedAt: Date;
   files: ProjectFile[];
   _count: { rounds: number };
   rounds: ProjectRound[];
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ archived?: string }>;
+}) {
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const setupStatus = await getSetupStatus();
+  if (!setupStatus.ready) {
+    redirect("/setup");
+  }
+  const showArchived =
+    resolvedSearchParams.archived === "1" || resolvedSearchParams.archived === "true";
+
   let projects: Project[] = [];
   let archivedProjects: Project[] = [];
   let dbError = false;
@@ -103,18 +120,26 @@ export default async function DashboardPage() {
     dbError = true;
   }
 
+  const visibleProjects = showArchived
+    ? [...projects, ...archivedProjects].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      )
+    : projects;
+
   let openIssues = 0;
   let resolvedIssues = 0;
   let totalIssues = 0;
+  const latestRoundIds = visibleProjects
+    .map((project) => project.rounds[0]?.id)
+    .filter((id): id is string => typeof id === "string");
 
   if (!dbError) {
     try {
       const { prisma } = await import("@/lib/db");
-      const projectIds = projects.map((p) => p.id);
-      if (projectIds.length > 0) {
+      if (latestRoundIds.length > 0) {
         const counts = await prisma.issueCluster.groupBy({
           by: ["status"],
-          where: { round: { projectId: { in: projectIds } } },
+          where: { roundId: { in: latestRoundIds } },
           _count: true,
         });
         for (const c of counts) {
@@ -126,18 +151,15 @@ export default async function DashboardPage() {
     } catch { /* non-critical */ }
   }
 
-  const totalComments = projects.reduce(
-    (sum, p) => sum + p.files.reduce((s, f) => s + f._count.comments, 0),
-    0
-  );
-  const totalFiles = projects.reduce((sum, p) => sum + p.files.length, 0);
-  const totalRounds = projects.reduce((sum, p) => sum + p._count.rounds, 0);
-  const syncErrors = projects.reduce(
+  const totalComments = visibleProjects.reduce((sum, p) => sum + (p.rounds[0]?.commentCount ?? 0), 0);
+  const totalFiles = visibleProjects.reduce((sum, p) => sum + p.files.length, 0);
+  const totalRounds = latestRoundIds.length;
+  const syncErrors = visibleProjects.reduce(
     (sum, p) => sum + p.files.filter((f) => f.lastError).length,
     0
   );
 
-  const recentRounds = projects
+  const recentRounds = visibleProjects
     .flatMap((p) =>
       p.rounds.map((r) => {
         let files = r.files;
@@ -175,6 +197,18 @@ export default async function DashboardPage() {
         </Link>
       </div>
 
+      <div className="mt-4 flex items-center gap-2">
+        <Link
+          href={showArchived ? "/" : "/?archived=1"}
+          className={cn(
+            buttonVariants({ variant: showArchived ? "secondary" : "outline", size: "sm" }),
+            "rounded-lg"
+          )}
+        >
+          {showArchived ? "Showing archived + active" : "Show archived"}
+        </Link>
+      </div>
+
       {dbError ? (
         <div className="glass mt-8 flex items-center gap-3 rounded-lg p-4 text-sm">
           <AlertTriangle className="size-5 text-destructive shrink-0" />
@@ -185,8 +219,8 @@ export default async function DashboardPage() {
             </p>
           </div>
         </div>
-      ) : projects.length === 0 ? (
-        <div className="mt-12">
+      ) : visibleProjects.length === 0 ? (
+        <div className="mt-8">
           <EmptyState
             icon={MessageSquare}
             title="No projects yet"
@@ -196,13 +230,18 @@ export default async function DashboardPage() {
               <Plus className="mr-2 size-4" />
               Create your first project
             </Link>
+            {archivedProjects.length > 0 && (
+              <Link href="/?archived=1" className={cn(buttonVariants({ variant: "outline" }), "rounded-lg")}>
+                Show archived projects
+              </Link>
+            )}
           </EmptyState>
         </div>
       ) : (
         <>
           <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <QuickCreate />
-            {projects.map((project) => {
+            {visibleProjects.map((project) => {
               const comments = project.files.reduce((sum, f) => sum + f._count.comments, 0);
               const hasError = project.files.some((f) => f.lastError);
               return (
@@ -224,9 +263,14 @@ export default async function DashboardPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <h2 className="font-heading text-base font-semibold truncate">{project.name}</h2>
-                          {hasError && (
-                            <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
-                          )}
+                          <div className="flex items-center gap-1">
+                            {project.archived && (
+                              <Archive className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                            )}
+                            {hasError && (
+                              <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
+                            )}
+                          </div>
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                           <Badge variant="secondary" className="text-[11px] gap-1 px-1.5 py-0">
@@ -263,7 +307,13 @@ export default async function DashboardPage() {
                       </p>
                     )}
                   </Link>
-                  <div className="flex justify-end border-t border-border/60 px-3 py-2">
+                  <div className="flex items-center justify-end gap-1 border-t border-border/60 px-3 py-2">
+                    {project.archived && (
+                      <ArchiveProjectButton
+                        projectId={project.id}
+                        archived={true}
+                      />
+                    )}
                     <DeleteProjectButton
                       projectId={project.id}
                       projectName={project.name}
@@ -278,11 +328,11 @@ export default async function DashboardPage() {
           <div className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
             <div className="glass rounded-lg px-4 py-3 text-center">
               <p className="text-2xl font-semibold font-heading">{totalComments}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Comments</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Comments (latest rounds)</p>
             </div>
             <div className="glass rounded-lg px-4 py-3 text-center">
               <p className="text-2xl font-semibold font-heading">{totalRounds}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Analyses</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Projects with analyses</p>
             </div>
             <div className="glass rounded-lg px-4 py-3 text-center">
               <p className="text-2xl font-semibold font-heading">{totalFiles}</p>
@@ -344,47 +394,6 @@ export default async function DashboardPage() {
                     <Sparkles className="size-4 text-primary shrink-0 ml-3" />
                   </Link>
                 ))}
-              </div>
-            </section>
-          )}
-
-          {archivedProjects.length > 0 && (
-            <section className="mt-8">
-              <h2 className="flex items-center gap-2 font-heading text-base font-semibold mb-3">
-                <Archive className="size-4 text-muted-foreground" />
-                Archived
-              </h2>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {archivedProjects.map((project) => {
-                  const comments = project.files.reduce((sum, f) => sum + f._count.comments, 0);
-                  return (
-                    <div
-                      key={project.id}
-                      className="glass flex flex-col overflow-hidden rounded-lg opacity-60 transition-opacity hover:opacity-100"
-                    >
-                      <Link href={`/project/${project.id}`} className="block p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                            <Archive className="size-4 text-muted-foreground" />
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="text-sm font-medium truncate">{project.name}</h3>
-                            <p className="text-xs text-muted-foreground">
-                              {project.files.length} files · {comments} comments
-                            </p>
-                          </div>
-                        </div>
-                      </Link>
-                      <div className="flex justify-end border-t border-border/60 px-3 py-2">
-                        <DeleteProjectButton
-                          projectId={project.id}
-                          projectName={project.name}
-                          afterDelete="refresh"
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
             </section>
           )}

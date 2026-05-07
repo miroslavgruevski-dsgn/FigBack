@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
+import { requireApiSession } from "@/lib/api-guards";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
-import { createJob, expireStaleJobs, findActiveJobWithPayload } from "@/lib/jobs";
+import { createJob, expireStaleJobs, findActivePipelineJob } from "@/lib/jobs";
 import { logger } from "@/lib/logger";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { apiErrorJson } from "@/lib/errors";
 
 const schema = z.object({
   projectId: z.string().min(1),
@@ -15,11 +18,20 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   const startedAt = Date.now();
   try {
+    const guard = await requireApiSession();
+    if (!guard.ok) return guard.response;
+    const userId = guard.session.user?.id;
+    if (!userId) {
+      return apiErrorJson(401, "unauthorized", "Unauthorized");
+    }
+
     if (!isCsrfOriginAllowed(req)) {
-      return NextResponse.json(
-        { error: "CSRF rejected", code: "csrf_rejected" },
-        { status: 403 }
-      );
+      return apiErrorJson(403, "csrf_rejected", "CSRF rejected");
+    }
+
+    const { allowed } = checkRateLimit(`reanalyze:${userId}`);
+    if (!allowed) {
+      return apiErrorJson(429, "rate_limited", "Too many requests. Try again in a minute.");
     }
 
     let body: unknown;
@@ -43,31 +55,16 @@ export async function POST(req: NextRequest) {
     const { projectId } = parsed.data;
     await expireStaleJobs(projectId);
 
-    const activePrepare = await findActiveJobWithPayload(projectId, "prepare_reanalysis");
-    if (activePrepare) {
+    const activePipeline = await findActivePipelineJob(projectId);
+    if (activePipeline) {
       const roundId =
-        typeof activePrepare.payload.roundId === "string"
-          ? activePrepare.payload.roundId
+        typeof activePipeline.payload.roundId === "string"
+          ? activePipeline.payload.roundId
           : undefined;
       return NextResponse.json({
-        message: "Re-analysis already in progress",
+        message: "Analysis already running",
         code: "already_in_progress",
-        jobId: activePrepare.id,
-        roundId,
-        jobsQueued: true,
-      });
-    }
-
-    const activeClassify = await findActiveJobWithPayload(projectId, "classify");
-    if (activeClassify) {
-      const roundId =
-        typeof activeClassify.payload.roundId === "string"
-          ? activeClassify.payload.roundId
-          : undefined;
-      return NextResponse.json({
-        message: "Re-analysis already in progress",
-        code: "already_in_progress",
-        jobId: activeClassify.id,
+        jobId: activePipeline.id,
         roundId,
         jobsQueued: true,
       });
@@ -84,10 +81,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const now = new Date();
+    const roundName = now.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+
     const round = await prisma.reviewRound.create({
       data: {
         projectId,
-        name: `Re-analysis ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`,
+        name: `Re-analysis · ${roundName}`,
       },
     });
 

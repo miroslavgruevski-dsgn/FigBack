@@ -9,8 +9,22 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: figback
+          POSTGRES_USER: figback
+          POSTGRES_PASSWORD: figback
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U figback -d figback"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     env:
-      DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/figback
+      DATABASE_URL: postgresql://figback:figback@localhost:5432/figback
       AUTH_SECRET: ci-auth-secret
       AUTH_GOOGLE_ID: ci-placeholder
       AUTH_GOOGLE_SECRET: ci-placeholder
@@ -21,7 +35,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "20.19"
           cache: npm
 
       - run: npm ci
@@ -31,6 +45,12 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Prisma migration status
+        run: npx prisma migrate status
 
       - name: Build
         run: npm run build

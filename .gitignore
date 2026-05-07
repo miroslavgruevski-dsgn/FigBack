@@ -32,6 +32,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+pnpm-debug.log*
+*.log
 
 # typescript
 *.tsbuildinfo
@@ -54,10 +56,12 @@ CHANGELOG.AI.md
 starting-prompt.md
 read.md
 .vercel
-.env*.local
 
 # cache / local tooling
 .eslintcache
 .turbo
+.cache/
+tmp/
 coverage/
 *.pem
+.env*.local

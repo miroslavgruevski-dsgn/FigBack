@@ -1,4 +1,4 @@
-import { Sparkles, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface SummaryCardProps {
@@ -6,52 +6,40 @@ interface SummaryCardProps {
   topIssues: string[];
   sentiment: "positive" | "mixed" | "negative";
   keyThemes: string[];
+  source?: "llm" | "heuristic" | null;
 }
 
-const sentimentConfig = {
-  positive: { icon: TrendingUp, label: "Positive", className: "text-status-done" },
-  mixed: { icon: Minus, label: "Mixed", className: "text-priority-medium" },
-  negative: { icon: TrendingDown, label: "Needs attention", className: "text-priority-high" },
-};
-
-export function SummaryCard({ summary, topIssues, sentiment, keyThemes }: SummaryCardProps) {
-  const s = sentimentConfig[sentiment];
+export function SummaryCard({ summary, topIssues, keyThemes, source }: SummaryCardProps) {
+  const extraBits: string[] = [];
+  if (topIssues.length > 0) {
+    const highlights = topIssues
+      .slice(0, 2)
+      .map((item) => item.replace(/^\[[^\]]+\]\s*[^:]+:\s*/i, "").trim())
+      .filter(Boolean);
+    if (highlights.length > 0) {
+      extraBits.push(`Highlights: ${highlights.join(" ")}`);
+    }
+  }
+  if (keyThemes.length > 0) {
+    extraBits.push(`Themes: ${keyThemes.slice(0, 3).join(", ")}.`);
+  }
+  const expandedSummary = [summary.trim(), ...extraBits].join(" ");
 
   return (
-    <div className="glass-tint rounded-lg p-6 space-y-4">
-      <div className="flex items-center gap-2">
-        <Sparkles className="size-5 text-primary" />
-        <h2 className="font-heading text-lg font-semibold">At a Glance</h2>
-        <div className="ml-auto flex items-center gap-1.5">
-          <s.icon className={`size-4 ${s.className}`} />
-          <span className={`text-xs font-medium ${s.className}`}>{s.label}</span>
-        </div>
+    <div className="glass-tint rounded-lg p-5 sm:p-6">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 font-heading text-lg font-semibold">
+          <Sparkles className="size-5 text-primary" />
+          At a Glance
+        </h2>
+        {source === "heuristic" && (
+          <Badge variant="secondary" className="text-[10px] rounded-full px-2 py-0.5">
+            fallback mode
+          </Badge>
+        )}
       </div>
 
-      <p className="text-sm leading-relaxed text-muted-foreground">{summary}</p>
-
-      {topIssues.length > 0 && (
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-            Top Issues
-          </h3>
-          <ol className="list-decimal list-inside space-y-1">
-            {topIssues.map((issue, i) => (
-              <li key={i} className="text-sm text-foreground/90">{issue}</li>
-            ))}
-          </ol>
-        </div>
-      )}
-
-      {keyThemes.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {keyThemes.map((theme) => (
-            <Badge key={theme} variant="secondary" className="text-xs">
-              {theme}
-            </Badge>
-          ))}
-        </div>
-      )}
+      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{expandedSummary}</p>
     </div>
   );
 }

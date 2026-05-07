@@ -1,21 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createJobChain, expireStaleJobs, hasActiveJob } from "@/lib/jobs";
+import { requireApiSession } from "@/lib/api-guards";
+import { createJobChain, expireStaleJobs, findActivePipelineJob } from "@/lib/jobs";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { apiErrorJson } from "@/lib/errors";
+import { prisma } from "@/lib/db";
 
 const syncSchema = z.object({
   projectId: z.string().min(1),
 });
 
 export async function POST(req: NextRequest) {
-  if (!isCsrfOriginAllowed(req)) {
-    return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
+  const guard = await requireApiSession();
+  if (!guard.ok) return guard.response;
+  const userId = guard.session.user?.id;
+  if (!userId) {
+    return apiErrorJson(401, "unauthorized", "Unauthorized");
   }
 
-  const { allowed } = checkRateLimit("sync");
+  if (!isCsrfOriginAllowed(req)) {
+    return apiErrorJson(403, "csrf_rejected", "CSRF rejected");
+  }
+
+  const { allowed } = checkRateLimit(`sync:${userId}`);
   if (!allowed) {
-    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+    return apiErrorJson(429, "rate_limited", "Too many requests. Try again in a minute.");
   }
 
   const body = await req.json();
@@ -28,20 +38,39 @@ export async function POST(req: NextRequest) {
 
   await expireStaleJobs(projectId);
 
-  const existing = await hasActiveJob(projectId, "sync_full");
+  const existing = await findActivePipelineJob(projectId);
   if (existing) {
+    const roundId =
+      typeof existing.payload.roundId === "string" ? existing.payload.roundId : undefined;
     return NextResponse.json({
-      message: "Sync already in progress",
+      message: "Analysis already running",
       jobId: existing.id,
+      roundId,
     });
   }
 
+  const now = new Date();
+  const roundName = now.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  const round = await prisma.reviewRound.create({
+    data: {
+      projectId,
+      name: roundName,
+    },
+  });
+
   const firstJob = await createJobChain(projectId, [
-    { type: "sync_full", payload: { projectId } },
-    { type: "export_images", payload: { projectId } },
-    { type: "classify", payload: { projectId } },
-    { type: "cluster", payload: { projectId } },
+    { type: "sync_full", payload: { projectId, roundId: round.id } },
+    { type: "classify", payload: { projectId, roundId: round.id } },
+    { type: "cluster", payload: { projectId, roundId: round.id } },
+    { type: "export_images", payload: { projectId, roundId: round.id } },
   ]);
 
-  return NextResponse.json({ jobId: firstJob?.id });
+  return NextResponse.json({ jobId: firstJob?.id, roundId: round.id });
 }

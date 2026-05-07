@@ -65,8 +65,8 @@ export default function SecurityPage() {
       <div className="glass mt-8 rounded-lg p-5">
         <h2 className="font-heading text-base font-semibold">Data Retention</h2>
         <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-          Configure automatic data purge in Settings. Default retention is 90 days.
-          Purging permanently deletes comments, images, and digests from all storage.
+          Configure how long a project can stay idle before it is soft-archived (Settings, default 90 days).
+          Archiving hides projects from the main list; it does not delete Figma or database rows.
         </p>
       </div>
 

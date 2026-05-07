@@ -1,3 +1,5 @@
+import { summarizeIntegrationError } from "./error-summary";
+
 interface ConfluenceConfig {
   baseUrl: string;
   email: string;
@@ -48,12 +50,41 @@ export async function pushToConfluence(
 
     if (!res.ok) {
       const text = await res.text();
-      return { ok: false, error: `Confluence error ${res.status}: ${text}` };
+      return {
+        ok: false,
+        error: summarizeIntegrationError(`Confluence error ${res.status}: ${text}`),
+      };
     }
 
     const data = await res.json();
     const pageUrl = `${config.baseUrl}${data._links?.webui ?? ""}`;
     return { ok: true, pageUrl };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+export async function testConfluenceConnection(
+  config: ConfluenceConfig
+): Promise<{ ok: boolean; error?: string }> {
+  const auth = Buffer.from(`${config.email}:${config.token}`).toString("base64");
+  const url = `${config.baseUrl}/rest/api/space/${encodeURIComponent(config.spaceKey)}`;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Basic ${auth}`,
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return {
+        ok: false,
+        error: summarizeIntegrationError(`Confluence error ${res.status}: ${text}`),
+      };
+    }
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
   }

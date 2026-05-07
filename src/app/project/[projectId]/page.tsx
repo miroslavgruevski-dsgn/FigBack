@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Clock, Sparkles, MessageSquare, TrendingUp } from "lucide-react";
+import { ArrowLeft, Clock, TrendingUp } from "lucide-react";
 import { GenerateDigestButton } from "./generate-button";
 import { ReanalyzeButton } from "./reanalyze-button";
 import { DeleteProjectButton } from "./delete-project-button";
@@ -8,10 +8,11 @@ import { ArchiveProjectButton } from "./archive-project-button";
 import { EditableTitle } from "./editable-title";
 import { FigmaTokenField } from "./figma-token-field";
 import { FileManager } from "./file-manager";
-import { DeleteAnalysisButton } from "./delete-analysis-button";
+import { AnalysisCardMenu } from "./analysis-card-menu";
 import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/error-state";
 import { ProjectAlerts, type ProjectAlertItem } from "@/components/project/project-alerts";
+import { summarizeIntegrationError } from "@/lib/integrations/error-summary";
 import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,20 @@ type RoundWithFiles = {
   syncedAt: Date;
   commentCount: number;
   computedCardCount: number;
+  openIssueCount: number;
+  inProgressIssueCount: number;
+  closedIssueCount: number;
+  summarySource: "llm" | "heuristic" | null;
+  aiSummary: string | null;
+  aiTopIssues: string[];
+  aiThemes: string[];
+  previewUrls: string[];
+  runType: "analysis" | "reanalysis";
+  hasSameDayDuplicate: boolean;
+  deltaLabel: string | null;
+  noMaterialChange: boolean;
+  manualStatus: "open" | "in_progress" | "done" | "none";
+  allCommentsResolved: boolean;
   files?: { name: string; commentCount: number }[];
 };
 
@@ -29,7 +44,7 @@ interface ProjectData {
   id: string;
   name: string;
   archived: boolean;
-  figmaAccessToken?: string | null;
+  hasProjectFigmaToken: boolean;
   files: {
     id: string;
     name: string;
@@ -83,6 +98,31 @@ function formatJobProgress(type: string, payload?: Record<string, unknown>): str
   }
 }
 
+function roundDayKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function shortRoundToken(id: string): string {
+  return `#${id.slice(-6)}`;
+}
+
+function diffPrefix(value: number): string {
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+function manualStatusLabel(status: RoundWithFiles["manualStatus"]): string {
+  switch (status) {
+    case "done":
+      return "Status: Done";
+    case "in_progress":
+      return "Status: In progress";
+    case "open":
+      return "Status: Open";
+    default:
+      return "Status: No issues";
+  }
+}
+
 export default async function ProjectPage({
   params,
 }: {
@@ -108,24 +148,159 @@ export default async function ProjectPage({
           orderBy: { syncedAt: "desc" },
           take: 10,
           select: {
-            id: true, name: true, syncedAt: true, commentCount: true,
-            cards: { select: { comment: { select: { file: { select: { name: true } } } } } },
+            id: true,
+            name: true,
+            syncedAt: true,
+            commentCount: true,
+            executiveSummary: true,
+            summarySource: true,
+            cards: {
+              select: {
+                fullFrameUrl: true,
+                comment: { select: { resolvedAt: true, file: { select: { name: true } } } },
+              },
+            },
           },
         },
         _count: { select: { rounds: true } },
       },
     });
     if (raw) {
-      const rounds = raw.rounds.map((r) => {
+      const roundIds = raw.rounds.map((r) => r.id);
+      const issueCounts = roundIds.length
+        ? await prisma.issueCluster.groupBy({
+            by: ["roundId", "status"],
+            where: { roundId: { in: roundIds } },
+            _count: true,
+          })
+        : [];
+      const issueCountByRound = new Map<string, { open: number; inProgress: number; closed: number }>();
+      for (const row of issueCounts) {
+        const existing = issueCountByRound.get(row.roundId) ?? { open: 0, inProgress: 0, closed: 0 };
+        if (row.status === "done") {
+          existing.closed += row._count;
+        } else if (row.status === "in_progress") {
+          existing.inProgress += row._count;
+        } else if (row.status === "open" || row.status === "in_progress") {
+          existing.open += row._count;
+        }
+        issueCountByRound.set(row.roundId, existing);
+      }
+
+      const roundsBase = raw.rounds.map((r) => {
         const fileCounts = new Map<string, number>();
         for (const card of r.cards) {
           const name = card.comment.file.name;
           fileCounts.set(name, (fileCounts.get(name) ?? 0) + 1);
         }
+        let aiSummary: string | null = null;
+        let aiTopIssues: string[] = [];
+        let aiThemes: string[] = [];
+        if (r.executiveSummary) {
+          try {
+            const parsed = JSON.parse(r.executiveSummary) as {
+              summary?: string;
+              topIssues?: string[];
+              keyThemes?: string[];
+            };
+            aiSummary = typeof parsed.summary === "string" ? parsed.summary : null;
+            aiTopIssues = Array.isArray(parsed.topIssues)
+              ? parsed.topIssues.filter((v): v is string => typeof v === "string").slice(0, 2)
+              : [];
+            aiThemes = Array.isArray(parsed.keyThemes)
+              ? parsed.keyThemes.filter((v): v is string => typeof v === "string").slice(0, 2)
+              : [];
+          } catch {
+            // keep defaults when summary is not valid JSON
+          }
+        }
+        const previewUrls = [
+          ...new Set(
+            r.cards
+              .map((card) => card.fullFrameUrl)
+              .filter((u): u is string => typeof u === "string" && u.length > 0)
+          ),
+        ].slice(0, 3);
+        const issueCountsForRound = issueCountByRound.get(r.id) ?? {
+          open: 0,
+          inProgress: 0,
+          closed: 0,
+        };
+        const runType = r.name?.toLowerCase().startsWith("re-analysis")
+          ? "reanalysis"
+          : "analysis";
+        const totalIssues =
+          issueCountsForRound.open + issueCountsForRound.inProgress + issueCountsForRound.closed;
+        const manualStatus: RoundWithFiles["manualStatus"] =
+          totalIssues === 0
+            ? "none"
+            : issueCountsForRound.closed === totalIssues
+              ? "done"
+              : issueCountsForRound.inProgress > 0
+                ? "in_progress"
+                : "open";
+        const allCommentsResolved =
+          r.cards.length > 0 && r.cards.every((card) => card.comment.resolvedAt !== null);
         return {
-          id: r.id, name: r.name, syncedAt: r.syncedAt, commentCount: r.commentCount,
+          id: r.id,
+          name: r.name,
+          syncedAt: r.syncedAt,
+          commentCount: r.commentCount,
           computedCardCount: r.cards.length,
+          openIssueCount: issueCountsForRound.open,
+          inProgressIssueCount: issueCountsForRound.inProgress,
+          closedIssueCount: issueCountsForRound.closed,
+          summarySource:
+            r.summarySource === "heuristic" || r.summarySource === "llm"
+              ? r.summarySource
+              : null,
+          aiSummary,
+          aiTopIssues,
+          aiThemes,
+          previewUrls,
+          runType,
+          hasSameDayDuplicate: false,
+          deltaLabel: null,
+          noMaterialChange: false,
+          manualStatus,
+          allCommentsResolved,
           files: [...fileCounts.entries()].map(([name, count]) => ({ name, commentCount: count })),
+        };
+      });
+      const dayCounts = new Map<string, number>();
+      for (const round of roundsBase) {
+        const key = roundDayKey(round.syncedAt);
+        dayCounts.set(key, (dayCounts.get(key) ?? 0) + 1);
+      }
+      const rounds = roundsBase.map((round, idx) => {
+        const previous = roundsBase[idx + 1];
+        if (!previous) {
+          return {
+            ...round,
+            hasSameDayDuplicate: (dayCounts.get(roundDayKey(round.syncedAt)) ?? 0) > 1,
+            deltaLabel: "Baseline run",
+            noMaterialChange: false,
+          };
+        }
+        const deltaComments = round.computedCardCount - previous.computedCardCount;
+        const deltaOpen = round.openIssueCount - previous.openIssueCount;
+        const deltaClosed = round.closedIssueCount - previous.closedIssueCount;
+        const summaryA = (round.aiSummary ?? "").trim().toLowerCase();
+        const summaryB = (previous.aiSummary ?? "").trim().toLowerCase();
+        const noMaterialChange =
+          deltaComments === 0 &&
+          deltaOpen === 0 &&
+          deltaClosed === 0 &&
+          round.summarySource === previous.summarySource &&
+          summaryA === summaryB;
+        const deltaLabel = noMaterialChange
+          ? "No material change from previous run"
+          : `${diffPrefix(deltaComments)} comments · ${diffPrefix(deltaOpen)} open issues · ${diffPrefix(deltaClosed)} closed`;
+        return {
+          ...round,
+          hasSameDayDuplicate: (dayCounts.get(roundDayKey(round.syncedAt)) ?? 0) > 1,
+          deltaLabel,
+          noMaterialChange,
         };
       });
       for (const r of rounds) {
@@ -137,7 +312,12 @@ export default async function ProjectPage({
           });
         }
       }
-      project = { ...raw, rounds } as unknown as ProjectData;
+      const { figmaAccessToken, ...rest } = raw;
+      project = {
+        ...rest,
+        rounds,
+        hasProjectFigmaToken: Boolean(figmaAccessToken),
+      } as unknown as ProjectData;
 
       if (raw.rounds.length > 0) {
         const lastRoundDate = raw.rounds[0].syncedAt;
@@ -199,7 +379,7 @@ export default async function ProjectPage({
         alertList.push({
           key: "integration",
           title: "Integration issue (Slack or Confluence)",
-          detail: teamCfg.lastIntegrationError,
+          detail: summarizeIntegrationError(teamCfg.lastIntegrationError),
           href: "/settings",
           linkText: "Review in settings",
         });
@@ -251,10 +431,12 @@ export default async function ProjectPage({
 
   if (!project) notFound();
 
-  const totalComments = project.files.reduce((sum, f) => sum + f._count.comments, 0);
-  const hasFilesLinked = project.files.length > 0;
-  const hasSyncedAnyFile = project.files.some((f) => !!f.lastSyncedAt);
-  const scopedFiles = project.files.filter(
+  const filesForUi = project.files;
+
+  const totalComments = filesForUi.reduce((sum, f) => sum + f._count.comments, 0);
+  const hasFilesLinked = filesForUi.length > 0;
+  const hasSyncedAnyFile = filesForUi.some((f) => !!f.lastSyncedAt);
+  const scopedFiles = filesForUi.filter(
     (f) =>
       (f.includedPages?.length ?? 0) > 0 || (f.includedFrames?.length ?? 0) > 0
   );
@@ -288,7 +470,7 @@ export default async function ProjectPage({
         <div>
           <EditableTitle projectId={projectId} name={project.name} />
           <p className="mt-1 text-sm text-muted-foreground">
-            {project.files.length} file{project.files.length !== 1 ? "s" : ""} · {totalComments} comments
+            {filesForUi.length} file{filesForUi.length !== 1 ? "s" : ""} · {totalComments} comments
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -313,7 +495,6 @@ export default async function ProjectPage({
           </span>
         </div>
       )}
-
       {activeJob && (
         <div className="mt-4 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-sm">
           <p className="font-medium text-foreground">Background processing</p>
@@ -332,14 +513,14 @@ export default async function ProjectPage({
       <div className="mt-6" id="figma-token-section">
         <FigmaTokenField
           projectId={projectId}
-          defaultValue={project.figmaAccessToken ?? null}
+          hasProjectOverride={project.hasProjectFigmaToken}
           autoOpen={hasTokenError}
         />
       </div>
 
       <FileManager
         projectId={projectId}
-        files={project.files}
+        files={filesForUi}
         hasTokenError={hasTokenError}
       />
 
@@ -366,23 +547,36 @@ export default async function ProjectPage({
               {project.rounds.map((round, idx) => (
                 <div
                   key={round.id}
-                  className="glass-tint hover-lift relative flex items-stretch gap-0 rounded-lg py-3 pl-8 pr-3 sm:pr-4"
+                  className="glass-tint hover-lift relative rounded-lg py-3 pl-8 pr-3 sm:pr-4"
                 >
                   <div
                     className={`absolute left-[7px] top-1/2 size-[10px] -translate-y-1/2 rounded-full border-2 border-primary ${idx === 0 ? "bg-primary" : "bg-background"}`}
                   />
                   <Link
                     href={`/project/${projectId}/digest?roundId=${round.id}`}
-                    className="min-w-0 flex-1 rounded-md py-0.5 pr-2 outline-offset-2 focus-visible:ring-2 focus-visible:ring-ring"
+                    className="min-w-0 block rounded-md py-0.5 pr-12 outline-offset-2 focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <p className="flex items-center gap-2 text-sm font-medium">
                       <span className="min-w-0 truncate">
-                        {round.name ?? "Unnamed analysis"}
+                        {round.runType === "reanalysis" ? "Re-analysis" : "Analysis"} ·{" "}
+                        {new Date(round.syncedAt).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
                       </span>
-                      <Sparkles
-                        className="size-4 shrink-0 text-primary/90"
-                        aria-hidden
-                      />
+                      {idx === 0 && (
+                        <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                          Latest
+                        </Badge>
+                      )}
+                      {round.hasSameDayDuplicate && (
+                        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                          {shortRoundToken(round.id)}
+                        </Badge>
+                      )}
                     </p>
                   {(() => {
                     const displayCount =
@@ -392,47 +586,120 @@ export default async function ProjectPage({
                     const countWasRepaired = round.commentCount !== round.computedCardCount;
                     return (
                       <>
-                        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <MessageSquare className="size-3 shrink-0" />
-                          <span>
-                            {displayCount} in this analysis ·{" "}
-                            {new Date(round.syncedAt).toLocaleDateString()}
-                          </span>
+                        <p className="mt-1 text-[11px] text-foreground/85">
+                          {displayCount} comments · {round.openIssueCount} open · {round.closedIssueCount} closed
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                            {manualStatusLabel(round.manualStatus)}
+                          </Badge>
+                          {round.allCommentsResolved && (
+                            <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                              Comments: All resolved
+                            </Badge>
+                          )}
+                        </div>
+                        <p
+                          className={`mt-1 text-[11px] ${round.noMaterialChange ? "text-muted-foreground" : "text-foreground/80"}`}
+                        >
+                          {round.deltaLabel}
                         </p>
                         {countWasRepaired && (
                           <p className="mt-1 text-[11px] text-muted-foreground">
-                            Count refreshed from analysis cards.
+                            Count refreshed.
                           </p>
                         )}
                       </>
                     );
                   })()}
-                    {round.computedCardCount === 0 && (
-                      <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
-                        Zero usually means every root thread was resolved in Figma or already used in
-                        a prior analysis. Only unresolved roots are included.
-                      </p>
-                    )}
-                    {round.files && round.files.length > 0 && (
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        {round.files.map((f) => (
-                          <Badge
-                            key={f.name}
-                            variant="secondary"
-                            className="gap-1 px-1.5 py-0 text-[10px]"
-                          >
-                            {f.name} ({f.commentCount})
-                          </Badge>
-                        ))}
+                    <div className="mt-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-medium text-foreground">AI at a glance</p>
+                        {round.summarySource === "heuristic" && (
+                          <div className="flex items-center gap-1">
+                            <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                              fallback mode
+                            </Badge>
+                            <span
+                              className="inline-flex size-4 items-center justify-center rounded-full border border-border/70 text-[10px] text-muted-foreground"
+                              title="Shown when AI summary used fallback because the LLM was unavailable or rate-limited."
+                              aria-label="Fallback mode info"
+                            >
+                              i
+                            </span>
+                          </div>
+                        )}
                       </div>
-                    )}
+                      {round.aiSummary ? (
+                        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground line-clamp-1">
+                          {round.aiSummary}
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Summary appears after classification and clustering finish.
+                        </p>
+                      )}
+                    </div>
+                    <details className="mt-2 rounded-md border border-border/50 bg-background/25 px-2.5 py-2">
+                      <summary className="cursor-pointer text-[11px] text-muted-foreground">Details</summary>
+                      {(round.aiTopIssues.length > 0 || round.aiThemes.length > 0) && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {[...round.aiTopIssues, ...round.aiThemes].slice(0, 2).map((item) => (
+                            <Badge
+                              key={`${round.id}-highlight-${item}`}
+                              variant="secondary"
+                              className="px-1.5 py-0 text-[10px]"
+                            >
+                              {item}
+                            </Badge>
+                          ))}
+                          {[...round.aiTopIssues, ...round.aiThemes].length > 2 && (
+                            <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                              +{[...round.aiTopIssues, ...round.aiThemes].length - 2} more
+                            </Badge>
+                          )}
+                        </div>
+                      )}
+                      {round.previewUrls.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-[11px] font-medium text-foreground/90">Figma previews</p>
+                          <div className="mt-1.5 flex gap-1.5">
+                            {round.previewUrls.map((url, i) => (
+                              <div
+                                key={`${round.id}-preview-${i}`}
+                                className="h-14 w-20 rounded-md border border-border/70 bg-muted/40 bg-cover bg-center"
+                                style={{ backgroundImage: `url("${url}")` }}
+                                aria-label={`Preview ${i + 1}`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {round.files && round.files.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {round.files.map((f) => (
+                            <Badge
+                              key={f.name}
+                              variant="secondary"
+                              className="gap-1 px-1.5 py-0 text-[10px]"
+                            >
+                              {f.name} ({f.commentCount})
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      {round.computedCardCount === 0 && (
+                        <p className="mt-2 text-[11px] text-muted-foreground leading-snug">
+                          Zero usually means every root thread was resolved in Figma or already used in a prior analysis.
+                        </p>
+                      )}
+                    </details>
                   </Link>
-                  <div className="flex shrink-0 items-center self-center border-l border-border/50 pl-3 sm:pl-3.5">
-                    <DeleteAnalysisButton
+                  <div className="absolute right-3 top-3">
+                    <AnalysisCardMenu
                       projectId={projectId}
                       roundId={round.id}
                       analysisLabel={round.name ?? "Analysis"}
-                      afterDelete="refresh"
                     />
                   </div>
                 </div>

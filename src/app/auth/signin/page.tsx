@@ -1,11 +1,23 @@
 import { signIn } from "@/lib/auth";
 import { MessageSquare, Sparkles, BarChart3, Bell, ShieldCheck } from "lucide-react";
 
-export default function SignInPage({
+export default async function SignInPage({
   searchParams,
 }: {
   searchParams: Promise<{ callbackUrl?: string; error?: string }>;
 }) {
+  const params = await searchParams;
+  const allowedDomain = (process.env.ALLOWED_EMAIL_DOMAIN || "").trim().toLowerCase();
+  const googleConfigured = Boolean(
+    process.env.AUTH_GOOGLE_ID ||
+      process.env.AUTH_GOOGLE_CLIENT_ID ||
+      process.env.GOOGLE_CLIENT_ID
+  ) && Boolean(
+    process.env.AUTH_GOOGLE_SECRET ||
+      process.env.AUTH_GOOGLE_CLIENT_SECRET ||
+      process.env.GOOGLE_CLIENT_SECRET
+  );
+
   return (
     <div className="w-full max-w-4xl">
       <div className="grid gap-6 lg:grid-cols-2 lg:gap-0">
@@ -29,8 +41,8 @@ export default function SignInPage({
           <div className="mt-8 grid gap-3 sm:grid-cols-2">
             <FeatureChip icon={Sparkles} label="LLM classification" description="Gemini, GPT, or Claude" />
             <FeatureChip icon={BarChart3} label="Visual digests" description="Priority-sorted reports" />
-            <FeatureChip icon={Bell} label="Real-time alerts" description="Slack + push notifications" />
-            <FeatureChip icon={ShieldCheck} label="Team-only access" description="Restricted to @symphony.is" />
+            <FeatureChip icon={Bell} label="Notifications" description="Push alerts and integrations" />
+            <FeatureChip icon={ShieldCheck} label="Access control" description={allowedDomain ? `Restricted to @${allowedDomain}` : "Configured by your team"} />
           </div>
         </div>
 
@@ -39,17 +51,23 @@ export default function SignInPage({
             <div className="text-center">
               <h2 className="font-heading text-xl font-semibold">Welcome back</h2>
               <p className="mt-2 text-sm text-muted-foreground">
-                Sign in with your Symphony Google account.
+                Sign in with your Google account.
               </p>
             </div>
 
-            <SignInForm searchParams={searchParams} />
+            <SignInForm params={params} googleConfigured={googleConfigured} allowedDomain={allowedDomain} />
 
             <div className="mt-6 rounded-lg bg-primary/5 px-3 py-2.5 text-center">
               <p className="text-xs text-muted-foreground">
                 <ShieldCheck className="inline size-3 mr-1 -mt-0.5" />
-                Only <span className="font-medium text-foreground">@symphony.is</span> emails are authorized.
-                Contact your team lead if you need access.
+                {allowedDomain ? (
+                  <>
+                    Only <span className="font-medium text-foreground">@{allowedDomain}</span> emails are authorized.
+                    Contact your admin if you need access.
+                  </>
+                ) : (
+                  <>Access policy is managed by your admin.</>
+                )}
               </p>
             </div>
           </div>
@@ -73,31 +91,47 @@ function FeatureChip({ icon: Icon, label, description }: { icon: typeof Sparkles
   );
 }
 
-async function SignInForm({
-  searchParams,
+function SignInForm({
+  params,
+  googleConfigured,
+  allowedDomain,
 }: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  params: { callbackUrl?: string; error?: string };
+  googleConfigured: boolean;
+  allowedDomain: string;
 }) {
-  const params = await searchParams;
+  const callbackUrl = params.callbackUrl || "/";
 
   return (
     <form
       className="mt-6"
       action={async () => {
         "use server";
-        await signIn("google", { redirectTo: params.callbackUrl || "/" });
+        await signIn(
+          "google",
+          { redirectTo: callbackUrl },
+          { prompt: "select_account" }
+        );
       }}
     >
-      {params.error && (
+      {!googleConfigured && (
+        <p className="mb-4 rounded-lg bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+          Google OAuth is not configured. Set `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` in `.env.local`.
+        </p>
+      )}
+      {params.error && googleConfigured && (
         <p className="mb-4 rounded-lg bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           {params.error === "AccessDenied"
-            ? "Access restricted. Only @symphony.is emails are allowed."
+            ? allowedDomain
+              ? `Access restricted. Only @${allowedDomain} emails are allowed.`
+              : "Access restricted by team policy."
             : "Something went wrong. Please try again."}
         </p>
       )}
       <button
         type="submit"
-        className="inline-flex w-full items-center justify-center gap-3 rounded-xl btn-gradient px-4 py-3.5 text-sm font-medium shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/30"
+        disabled={!googleConfigured}
+        className="inline-flex w-full items-center justify-center gap-3 rounded-xl btn-gradient px-4 py-3.5 text-sm font-medium shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <svg className="size-5" viewBox="0 0 24 24" aria-hidden="true">
           <path

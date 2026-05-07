@@ -3,6 +3,7 @@ import { z } from "zod";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { requireApiSession } from "@/lib/api-guards";
 
 const updateSchema = z.object({
   status: z.enum(["open", "in_progress", "done", "dismissed"]).optional(),
@@ -15,6 +16,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requireApiSession();
+  if (!guard.ok) return guard.response;
+
   if (!isCsrfOriginAllowed(req)) {
     return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
   }
@@ -28,7 +32,11 @@ export async function PATCH(
 
   const existing = await prisma.issueCluster.findUnique({
     where: { id },
-    select: { status: true },
+    select: {
+      status: true,
+      canonicalKey: true,
+      round: { select: { projectId: true } },
+    },
   });
   if (!existing) {
     return NextResponse.json({ error: "Issue not found" }, { status: 404 });
@@ -49,13 +57,26 @@ export async function PATCH(
     where: { id },
     data,
   });
+  let propagated = 0;
+  if (existing.canonicalKey) {
+    const result = await prisma.issueCluster.updateMany({
+      where: {
+        id: { not: id },
+        canonicalKey: existing.canonicalKey,
+        round: { projectId: existing.round.projectId },
+      },
+      data,
+    });
+    propagated = result.count;
+  }
   if (parsed.data.status) {
     logger.info("Issue status changed", {
       clusterId: id,
       from: existing.status,
       to: parsed.data.status,
+      propagated,
     });
   }
 
-  return NextResponse.json(cluster);
+  return NextResponse.json({ ...cluster, propagated });
 }

@@ -45,11 +45,24 @@ export async function createJobChain(
   return jobs[jobs.length - 1];
 }
 
+function retryDelayMs(attemptsAfterClaim: number): number {
+  const base = 2000;
+  const cap = 5 * 60 * 1000;
+  const exp = Math.min(cap, base * Math.pow(2, Math.max(0, attemptsAfterClaim - 1)));
+  const jitter = Math.floor(Math.random() * 1000);
+  return Math.min(cap, exp + jitter);
+}
+
 export async function claimJob(jobId: string) {
   try {
     return await prisma.job.update({
       where: { id: jobId, status: "pending" },
-      data: { status: "running", startedAt: new Date(), attempts: { increment: 1 } },
+      data: {
+        status: "running",
+        startedAt: new Date(),
+        attempts: { increment: 1 },
+        nextRetryAt: null,
+      },
     });
   } catch (err) {
     if (
@@ -86,14 +99,22 @@ export async function failJob(jobId: string, error: string) {
 
   const shouldRetry = job.attempts < job.maxRetries;
   const status: JobStatus = shouldRetry ? "pending" : "failed";
+  const nextRetryAt = shouldRetry
+    ? new Date(Date.now() + retryDelayMs(job.attempts))
+    : null;
 
   return prisma.job.update({
     where: { id: jobId },
-    data: { status, error, doneAt: shouldRetry ? null : new Date() },
+    data: {
+      status,
+      error,
+      doneAt: shouldRetry ? null : new Date(),
+      nextRetryAt,
+    },
   });
 }
 
-const STUCK_RUNNING_MS = 2 * 60 * 1000; // 2 minutes
+const STUCK_RUNNING_MS = 12 * 60 * 1000; // 12 minutes
 
 export async function recoverStuckJobs(projectId?: string) {
   const cutoff = new Date(Date.now() - STUCK_RUNNING_MS);
@@ -112,6 +133,7 @@ export async function recoverStuckJobs(projectId?: string) {
         status: shouldRetry ? "pending" : "failed",
         error: "Timed out (stuck)",
         doneAt: shouldRetry ? null : new Date(),
+        nextRetryAt: shouldRetry ? new Date(Date.now() + retryDelayMs(job.attempts)) : null,
       },
     });
   }
@@ -120,16 +142,18 @@ export async function recoverStuckJobs(projectId?: string) {
 
 export async function getNextPendingJob(projectId?: string) {
   await recoverStuckJobs(projectId);
+  const now = new Date();
   return prisma.job.findFirst({
     where: {
       status: "pending",
+      OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: now } }],
       ...(projectId ? { projectId } : {}),
     },
     orderBy: { createdAt: "asc" },
   });
 }
 
-const STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 
 export function jobActivityCutoff(): Date {
   return new Date(Date.now() - STALE_THRESHOLD_MS);
@@ -165,13 +189,47 @@ export async function findActiveJobWithPayload(
   return { id: j.id, payload: j.payload as Record<string, unknown> };
 }
 
+const DEFAULT_ACTIVE_PIPELINE_TYPES = [
+  "sync_full",
+  "prepare_reanalysis",
+  "classify",
+  "cluster",
+  "export_images",
+] as const;
+
+export async function findActivePipelineJob(
+  projectId: string,
+  types: string[] = [...DEFAULT_ACTIVE_PIPELINE_TYPES]
+): Promise<{ id: string; type: string; payload: Record<string, unknown> } | null> {
+  const j = await prisma.job.findFirst({
+    where: {
+      projectId,
+      type: { in: types },
+      status: { in: ["pending", "running", "waiting"] },
+      createdAt: { gt: jobActivityCutoff() },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, type: true, payload: true },
+  });
+  if (!j) return null;
+  return { id: j.id, type: j.type, payload: j.payload as Record<string, unknown> };
+}
+
 export async function expireStaleJobs(projectId: string) {
   const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
   await prisma.job.updateMany({
     where: {
       projectId,
-      status: { in: ["pending", "running", "waiting"] },
+      status: { in: ["pending", "waiting"] },
       createdAt: { lt: cutoff },
+    },
+    data: { status: "failed", error: "Expired (stale)", doneAt: new Date() },
+  });
+  await prisma.job.updateMany({
+    where: {
+      projectId,
+      status: "running",
+      startedAt: { lt: cutoff },
     },
     data: { status: "failed", error: "Expired (stale)", doneAt: new Date() },
   });

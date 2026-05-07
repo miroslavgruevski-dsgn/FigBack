@@ -17,6 +17,7 @@ interface DigestRound {
   name: string;
   syncedAt: Date;
   executiveSummary: string;
+  summarySource: "llm" | "heuristic" | null;
   commentCount: number;
 }
 
@@ -50,6 +51,8 @@ interface DigestCluster {
       suggestedAction: string;
       needsClarify: boolean;
       ambiguityReason: string | null;
+      source: "llm" | "heuristic";
+      confidence: number | null;
     } | null;
   }[];
 }
@@ -69,11 +72,27 @@ export default async function DigestPage({
   let viewClusters: DigestClusterView[] = [];
   let dbError = false;
 
-  if (roundId) {
+  let resolvedRoundId: string | undefined = roundId;
+
+  if (!resolvedRoundId) {
     try {
       const { prisma } = await import("@/lib/db");
-      const dbRound = await prisma.reviewRound.findUnique({
-        where: { id: roundId },
+      const latest = await prisma.reviewRound.findFirst({
+        where: { projectId, archived: false },
+        orderBy: { syncedAt: "desc" },
+        select: { id: true },
+      });
+      resolvedRoundId = latest?.id;
+    } catch {
+      dbError = true;
+    }
+  }
+
+  if (resolvedRoundId && !dbError) {
+    try {
+      const { prisma } = await import("@/lib/db");
+      const dbRound = await prisma.reviewRound.findFirst({
+        where: { id: resolvedRoundId, projectId },
         include: {
           clusters: {
             include: {
@@ -103,6 +122,8 @@ export default async function DigestPage({
         },
       });
       if (dbRound) {
+        const { rankIssueClusters } = await import("@/lib/digest/cluster");
+        const rankedDbClusters = rankIssueClusters(dbRound.clusters);
         const computedCount = dbRound.clusters.reduce((sum, cluster) => sum + cluster.cards.length, 0);
         if (dbRound.commentCount !== computedCount) {
           logger.warn("Digest round count mismatch on load", {
@@ -117,9 +138,13 @@ export default async function DigestPage({
           name: dbRound.name ?? "Digest",
           syncedAt: dbRound.syncedAt,
           executiveSummary: dbRound.executiveSummary ?? "",
+          summarySource:
+            dbRound.summarySource === "heuristic" || dbRound.summarySource === "llm"
+              ? dbRound.summarySource
+              : null,
           commentCount: computedCount,
         };
-        clusters = dbRound.clusters.map((c) => {
+        clusters = rankedDbClusters.map((c) => {
           const cardsWithPreview = c.cards.filter((card) => card.fullFrameUrl);
           const preferred =
             cardsWithPreview.find((card) => card.assessment) ?? cardsWithPreview[0];
@@ -158,6 +183,8 @@ export default async function DigestPage({
                     suggestedAction: card.assessment.suggestedAction,
                     needsClarify: card.assessment.needsClarify,
                     ambiguityReason: card.assessment.ambiguityReason,
+                    source: card.assessment.source === "heuristic" ? "heuristic" : "llm",
+                    confidence: card.assessment.confidence,
                   }
                 : null,
             })),
@@ -222,6 +249,10 @@ export default async function DigestPage({
   }
 
   const totalComments = clusters.reduce((sum, c) => sum + c.cards.length, 0);
+  const fallbackCount = clusters.reduce(
+    (sum, c) => sum + c.cards.filter((card) => card.assessment?.source === "heuristic").length,
+    0
+  );
 
   let summaryData: { summary: string; topIssues: string[]; sentiment: "positive" | "mixed" | "negative"; keyThemes: string[] } | null = null;
   if (round.executiveSummary) {
@@ -288,8 +319,19 @@ export default async function DigestPage({
             topIssues={summaryData.topIssues}
             sentiment={summaryData.sentiment}
             keyThemes={summaryData.keyThemes}
+            source={round.summarySource}
           />
         </div>
+      )}
+      {fallbackCount > 0 && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Some comments used fallback classification due to provider limits.
+        </p>
+      )}
+      {round.summarySource === "heuristic" && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          AI summary generated with fallback mode.
+        </p>
       )}
 
       <DigestView

@@ -124,6 +124,7 @@ model ReviewRound {
   syncedAt         DateTime       @default(now())
   archived         Boolean        @default(false)
   executiveSummary String?
+  summarySource    String?
   commentCount     Int            @default(0)
   clusters         IssueCluster[]
   cards            ReviewCard[]
@@ -164,6 +165,8 @@ model LLMAssessment {
   needsClarify    Boolean    @default(false)
   ambiguityReason String?
   priorityHint    String
+  source          String     @default("llm")
+  confidence      Float?
   rawOutput       String?
 }
 
@@ -171,6 +174,7 @@ model IssueCluster {
   id             String       @id @default(cuid())
   roundId        String
   round          ReviewRound  @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  canonicalKey   String?
   title          String
   summary        String
   frameId        String
@@ -189,6 +193,7 @@ model IssueCluster {
 
   @@index([roundId])
   @@index([status])
+  @@index([canonicalKey])
 }
 
 model Job {
@@ -201,12 +206,15 @@ model Job {
   maxRetries Int       @default(3)
   nextJobId  String?
   error      String?
+  /** When set in the future, pending job is not claimed until this time (retry backoff). */
+  nextRetryAt DateTime?
   createdAt  DateTime  @default(now())
   startedAt  DateTime?
   doneAt     DateTime?
 
   @@index([status, createdAt])
   @@index([projectId])
+  @@index([status, nextRetryAt])
 }
 
 model TeamConfig {

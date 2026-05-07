@@ -3,8 +3,15 @@ import { generateText } from "ai";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
 import { getProviderConfig, resolveModel } from "@/lib/llm/provider";
+import { canManageSettings, requireApiSession } from "@/lib/api-guards";
 
 export async function POST(req: NextRequest) {
+  const guard = await requireApiSession();
+  if (!guard.ok) return guard.response;
+  if (!canManageSettings(guard.email)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   if (!isCsrfOriginAllowed(req)) {
     return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
   }
@@ -38,8 +45,10 @@ export async function POST(req: NextRequest) {
       prompt: "Reply with exactly: ok",
     });
     return NextResponse.json({ ok: true as const });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ ok: false as const, error: msg }, { status: 422 });
+  } catch {
+    return NextResponse.json(
+      { ok: false as const, error: "LLM test failed. Verify model and credentials." },
+      { status: 422 }
+    );
   }
 }

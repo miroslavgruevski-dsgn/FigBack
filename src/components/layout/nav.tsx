@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UserMenu } from "./user-menu";
@@ -17,13 +18,37 @@ const hiddenRoutes = ["/auth", "/onboarding"];
 
 export function Nav() {
   const pathname = usePathname();
+  const [showSetupLink, setShowSetupLink] = useState(false);
+  const isHiddenRoute = hiddenRoutes.some((r) => pathname.startsWith(r));
 
-  if (hiddenRoutes.some((r) => pathname.startsWith(r))) return null;
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/setup/status", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { ready?: boolean };
+        if (mounted) setShowSetupLink(!data.ready);
+      } catch {
+        // Ignore nav-level setup fetch failures.
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   function isActive(href: string) {
     if (href === "/") return pathname === "/";
     return pathname.startsWith(href);
   }
+
+  const allLinks = showSetupLink
+    ? [{ href: "/setup", label: "Setup" }, ...links]
+    : links;
+
+  if (isHiddenRoute) return null;
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border/50 bg-background/80 backdrop-blur-lg">
@@ -36,7 +61,7 @@ export function Nav() {
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex">
-          {links.map((link) => (
+          {allLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
+import { canManageSettings, requireApiSession } from "@/lib/api-guards";
 
 const updateSchema = z.object({
   llmProvider: z.enum(["google", "openai", "anthropic"]).optional(),
@@ -29,23 +30,36 @@ function redact(value: string | null): string | null {
   return value.slice(0, 4) + "••••" + value.slice(-4);
 }
 
+function toSettingsResponse(config: Awaited<ReturnType<typeof prisma.teamConfig.upsert>>) {
+  return {
+    ...config,
+    figmaAccessToken: redact(config.figmaAccessToken),
+    llmApiKey: redact(config.llmApiKey),
+    confluenceToken: redact(config.confluenceToken),
+    slackWebhookUrl: redact(config.slackWebhookUrl),
+  };
+}
+
 export async function GET() {
+  const guard = await requireApiSession();
+  if (!guard.ok) return guard.response;
+
   const config = await prisma.teamConfig.upsert({
     where: { id: "default" },
     create: {},
     update: {},
   });
 
-  return NextResponse.json({
-    ...config,
-    figmaAccessToken: redact(config.figmaAccessToken),
-    llmApiKey: redact(config.llmApiKey),
-    confluenceToken: redact(config.confluenceToken),
-    slackWebhookUrl: redact(config.slackWebhookUrl),
-  });
+  return NextResponse.json(toSettingsResponse(config));
 }
 
 export async function PATCH(req: NextRequest) {
+  const guard = await requireApiSession();
+  if (!guard.ok) return guard.response;
+  if (!canManageSettings(guard.email)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   if (!isCsrfOriginAllowed(req)) {
     return NextResponse.json({ error: "CSRF rejected" }, { status: 403 });
   }
@@ -65,5 +79,5 @@ export async function PATCH(req: NextRequest) {
     update: parsed.data,
   });
 
-  return NextResponse.json(config);
+  return NextResponse.json(toSettingsResponse(config));
 }

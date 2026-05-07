@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { requireApiSession } from "@/lib/api-guards";
 import { isCsrfOriginAllowed } from "@/lib/csrf";
 import { prisma } from "@/lib/db";
-import { createJobChain, expireStaleJobs, findActiveJobWithPayload } from "@/lib/jobs";
+import { createJobChain, expireStaleJobs, findActivePipelineJob } from "@/lib/jobs";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { apiErrorJson } from "@/lib/errors";
 
 export const maxDuration = 60;
 
@@ -11,11 +14,20 @@ const digestSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const guard = await requireApiSession();
+  if (!guard.ok) return guard.response;
+  const userId = guard.session.user?.id;
+  if (!userId) {
+    return apiErrorJson(401, "unauthorized", "Unauthorized");
+  }
+
   if (!isCsrfOriginAllowed(req)) {
-    return NextResponse.json(
-      { error: "CSRF rejected", code: "csrf_rejected" },
-      { status: 403 }
-    );
+    return apiErrorJson(403, "csrf_rejected", "CSRF rejected");
+  }
+
+  const { allowed } = checkRateLimit(`digest:${userId}`);
+  if (!allowed) {
+    return apiErrorJson(429, "rate_limited", "Too many requests. Try again in a minute.");
   }
 
   let body: unknown;
@@ -83,21 +95,30 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const existing = await findActiveJobWithPayload(projectId, "sync_full");
+  const existing = await findActivePipelineJob(projectId);
   if (existing) {
     const roundId =
       typeof existing.payload.roundId === "string" ? existing.payload.roundId : undefined;
     return NextResponse.json({
-      message: "Digest generation already in progress",
+      message: "Analysis already running",
       jobId: existing.id,
       roundId,
     });
   }
 
+  const now = new Date();
+  const roundName = now.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
   const round = await prisma.reviewRound.create({
     data: {
       projectId,
-      name: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      name: roundName,
     },
   });
 

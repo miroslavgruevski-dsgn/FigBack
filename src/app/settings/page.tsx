@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { parseResponseJson } from "@/lib/parse-json-response";
+import { summarizeIntegrationError } from "@/lib/integrations/error-summary";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -49,6 +50,10 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [llmTestLoading, setLlmTestLoading] = useState(false);
+  const [slackTestLoading, setSlackTestLoading] = useState(false);
+  const [confluenceTestLoading, setConfluenceTestLoading] = useState(false);
+  const [slackTestResult, setSlackTestResult] = useState<string | null>(null);
+  const [confluenceTestResult, setConfluenceTestResult] = useState<string | null>(null);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -115,6 +120,52 @@ export default function SettingsPage() {
     }
   }
 
+  async function testSlackConnection() {
+    setSlackTestLoading(true);
+    setSlackTestResult(null);
+    try {
+      const res = await fetch("/api/settings/test-slack", { method: "POST" });
+      const data = await parseResponseJson<{ ok?: boolean; error?: string }>(res);
+      if (data?.ok) {
+        setSlackTestResult("Slack connection looks good.");
+        toast.success("Slack preflight passed");
+      } else {
+        const msg = data?.error ?? "Slack preflight failed";
+        setSlackTestResult(msg);
+        toast.error(msg);
+      }
+      await loadConfig();
+    } catch {
+      setSlackTestResult("Could not test Slack connection");
+      toast.error("Could not test Slack connection");
+    } finally {
+      setSlackTestLoading(false);
+    }
+  }
+
+  async function testConfluenceConnection() {
+    setConfluenceTestLoading(true);
+    setConfluenceTestResult(null);
+    try {
+      const res = await fetch("/api/settings/test-confluence", { method: "POST" });
+      const data = await parseResponseJson<{ ok?: boolean; error?: string }>(res);
+      if (data?.ok) {
+        setConfluenceTestResult("Confluence connection looks good.");
+        toast.success("Confluence preflight passed");
+      } else {
+        const msg = data?.error ?? "Confluence preflight failed";
+        setConfluenceTestResult(msg);
+        toast.error(msg);
+      }
+      await loadConfig();
+    } catch {
+      setConfluenceTestResult("Could not test Confluence connection");
+      toast.error("Could not test Confluence connection");
+    } finally {
+      setConfluenceTestLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[calc(100dvh-3.5rem)] items-center justify-center">
@@ -143,6 +194,9 @@ export default function SettingsPage() {
     !!config.confluenceEmail &&
     !!config.confluenceToken &&
     !!config.confluenceSpaceKey;
+  const integrationErrorSummary = config.lastIntegrationError
+    ? summarizeIntegrationError(config.lastIntegrationError)
+    : null;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -162,13 +216,18 @@ export default function SettingsPage() {
       </div>
 
       <div className="mt-8 space-y-4">
-        {config.lastIntegrationError && (
-          <div className="glass rounded-lg border border-destructive/25 bg-destructive/5 p-4 text-sm">
+        {integrationErrorSummary && (
+          <div className="glass rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-sm">
             <div className="flex gap-2">
               <AlertTriangle className="size-4 shrink-0 text-destructive mt-0.5" />
               <div>
                 <p className="font-medium text-foreground">Last integration error</p>
-                <p className="mt-1 text-xs text-muted-foreground">{config.lastIntegrationError}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{integrationErrorSummary}</p>
+                {config.lastIntegrationErrorAt && (
+                  <p className="mt-1 text-[11px] text-muted-foreground/80">
+                    {new Date(config.lastIntegrationErrorAt).toLocaleString()}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -331,6 +390,22 @@ export default function SettingsPage() {
                 Post digest to Slack after analysis and daily watch summary
               </Label>
             </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-lg h-8 gap-1.5 text-xs"
+                disabled={slackTestLoading}
+                onClick={() => void testSlackConnection()}
+              >
+                {slackTestLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}
+                Test Slack
+              </Button>
+              {slackTestResult && (
+                <p className="text-xs text-muted-foreground">{slackTestResult}</p>
+              )}
+            </div>
             <p className="text-[11px] text-muted-foreground pl-1">
               Digest posts after clustering. Daily cron uses the same webhook for per-project new-comment counts (watch mode).
             </p>
@@ -399,6 +474,22 @@ export default function SettingsPage() {
               <Label htmlFor="auto-confluence" className="text-sm">
                 Auto-push digest to Confluence after analysis
               </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-lg h-8 gap-1.5 text-xs"
+                disabled={confluenceTestLoading}
+                onClick={() => void testConfluenceConnection()}
+              >
+                {confluenceTestLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}
+                Test Confluence
+              </Button>
+              {confluenceTestResult && (
+                <p className="text-xs text-muted-foreground">{confluenceTestResult}</p>
+              )}
             </div>
           </div>
         </SettingsCard>
